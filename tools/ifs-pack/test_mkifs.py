@@ -22,10 +22,17 @@ IPL = os.path.join(HERE, '..', '..', 'firmware/iso/extracted/usr/share/IFS/'
 INPUTS = [os.environ.get(k, '') for k in ('HOGTIED_SHIM', 'HOGTIED_ZIMAGE', 'HOGTIED_DTB')]
 
 
-def boot(image, slot=0):
+# CONTROL_STATUS[14:13] package strap -> ROWSIZE the stock IPL programs
+# (0x40200AA4: default 0x280 = ROWSIZE 5; any strap bit set -> 0x200 = 4).
+STRAP_512M = 0x0000
+STRAP_256M = 0x6000
+
+
+def boot(image, slot=0, control_status=STRAP_256M):
     nand = E.Nand()
     nand.load_image(image, 4 + slot * E.IFS_BLOCKS)
-    emu = E.IplEmu(IPL, nand, E.Eeprom(E.default_eeprom()))
+    emu = E.IplEmu(IPL, nand, E.Eeprom(E.default_eeprom()),
+                   control_status=control_status)
     emu.follow = True
     emu.run(400_000_000)
     return emu
@@ -59,6 +66,37 @@ class PackedImageBootsOnStockIpl(unittest.TestCase):
         self.assertEqual(r2 % 8, 0)
         self.assertEqual(k['sctlr'] & 0x1005, 0)     # MMU and caches still off
         self.assertIn('HogTiedOS shim: starting Linux', emu.console.decode('latin-1'))
+
+    def _dtb_at_entry(self, emu):
+        r2 = emu.kernel_entry['regs'][2]
+        return bytes(emu.u.mem_read(r2, len(self.dtb)))
+
+    def _rowsize(self, emu):
+        cfg = struct.unpack('<I', emu.u.mem_read(E.EMIF4_SDRAM_CONFIG, 4))[0]
+        return (cfg >> 7) & 7
+
+    def test_256m_unit_keeps_256m(self):
+        emu = boot(self.image, control_status=STRAP_256M)
+        self.assertEqual(self._rowsize(emu), 4)        # set by the stock IPL
+        self.assertEqual(self._dtb_at_entry(emu), self.dtb)
+        self.assertNotIn('512 MiB', emu.console.decode('latin-1'))
+
+    def test_512m_unit_gets_512m_in_dtb(self):
+        emu = boot(self.image, control_status=STRAP_512M)
+        self.assertEqual(self._rowsize(emu), 5)        # set by the stock IPL
+        cell = mkifs.fdt_mem_size_cell(self.dtb)
+        expected = bytearray(self.dtb)
+        expected[cell:cell + 4] = struct.pack('>I', 0x20000000)
+        self.assertEqual(self._dtb_at_entry(emu), bytes(expected))  # only that cell
+        self.assertIn('512 MiB', emu.console.decode('latin-1'))
+
+    def test_shim_writes_only_uart3(self):
+        for strap in (STRAP_256M, STRAP_512M):
+            emu = boot(self.image, control_status=strap)
+            self.assertIsNotNone(emu.kernel_entry)
+            others = [(hex(pc), hex(a)) for pc, a, _ in emu.post_handoff_writes
+                      if a != E.UART3]
+            self.assertEqual(others, [], 'shim wrote to hardware other than UART3')
 
     def test_boots_from_slot_2(self):
         self.assertIsNotNone(boot(self.image, slot=2).kernel_entry)

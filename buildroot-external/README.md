@@ -51,15 +51,13 @@ package/                            custom packages (none yet)
   `update_nand_teb`, per `docs/findings/PROJECT_DECISIONS.md`.
 - **The boot-state EEPROM (I2C3, 0x50) is `read-only` in the DT.** It holds
   the IFS-slot valid flags the IPL uses to pick a slot.
-- **The boot shim touches nothing but UART3.** No DRAM, clock, pad or NAND
-  access; it only jumps to the kernel.
-
-## Known gaps (see TODO markers in the DTS)
+- **The boot shim writes nothing but UART3** (tested). Its only other
+  hardware access is one read of EMIF4 SDRAM_CONFIG to detect 512 MiB units,
+  the same read stock startup does.
 
 - SoC base (`am3517.dtsi`) is tentative. It gets confirmed from the kernel's
   IDCODE print on the first UART boot.
 - There's no pinctrl yet. The IPL pad table has now been extracted (board/
   clock/pin handoff) but hasn't been turned into DT pinctrl.
-- 512 MiB units run with 256 MiB until the shim reads EMIF4 ROWSIZE.
 - Display pixel clock is unresolved (pcd=8 vs refresh=60).
 - The DSP and IOC SPI devices are placeholders with no drivers.

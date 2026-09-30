@@ -40,9 +40,10 @@
 	 * DRAM. [confirmed] base 0x80000000 (the IPL copies itself there).
 	 * [confirmed] size: stock QNX startup (0x80100A18) reads EMIF4
 	 * SDRAM_CONFIG 0x6D000008 ROWSIZE[9:7] and registers 512 MiB if it is
-	 * 5, else 256 MiB. The IPL writes 5 or 4 depending on the package strap.
-	 * 256 MiB is correct on both variants. A loader may read (never write)
-	 * ROWSIZE and patch this to 0x20000000 when it reads 5.
+	 * 5, else 256 MiB. The IPL writes 5 when CONTROL_STATUS[14:13] == 0, else
+	 * 4 (CROSS_CHECKS.md sec. 9). Keep 256 MiB here: the boot shim reads
+	 * (never writes) ROWSIZE and patches this size cell to 0x20000000 on
+	 * 512 MiB units (tools/ifs-pack, tested on the stock IPL).
 	 */
 	memory@80000000 {
 		device_type = "memory";

@@ -144,7 +144,8 @@ board/clock/pin kit's extractor. Stock firmware lives in the gitignored
 - **DRAM size: 256 or 512 MiB, selected by EMIF4 ROWSIZE.** Stock startup at
   `0x80100A18`: `ldr [0x6D000008]; ubfx #7,#3; cmp #5` → 512 MiB, else
   256 MiB, both at 0x80000000. The IPL writes ROWSIZE 5 (`0x408016B2`) when
-  CONTROL_STATUS[14:13] is nonzero, else 4 (`0x40801632`). The DTS uses
+  CONTROL_STATUS[14:13] is **zero**, else 4 (`0x40801632`). See sec. 9 for the
+  correction; an earlier version of this line had it backwards. The DTS uses
   256 MiB, which is correct on both. Detecting 512 MiB only needs a register
   *read*.
 - **Display is 400x240, not 400x234.** This ISO carries only the premium
@@ -210,3 +211,20 @@ and a bad slot falls back to the next one. All of this is covered by
   requires, apart from r1/r2 (the shim sets them).
 - **Fail-open confirmed:** if every valid slot fails, the IPL prints "All
   partitions failed, retrying..." and tries all slots, including invalid ones.
+
+## 9. RAM-size strap polarity (correction)
+
+`boot_path_map.json` (`package_type_autodetect`, and the 0x6d000008 entry)
+says the IPL uses 0x408016B2 "if CONTROL_STATUS bit 0x6000 is set". **That's
+backwards.** IPL 0x40200A9C-0x40200AF8:
+
+```
+mov r3, #0x280                 ; default: ROWSIZE 5
+ldr r1, [CONTROL_STATUS]; and r1, #0x6000; cmp r1, #0; beq keep
+mov r3, #0x200                 ; any strap bit set: ROWSIZE 4
+```
+
+Confirmed by running it: CONTROL_STATUS 0x0000 → writes 0x408016B2 (stock
+startup then registers 512 MiB); 0x2000/0x4000/0x6000 → 0x40801632 (256 MiB).
+Which strap a real unit has is unknown until hardware, which is why the boot
+shim reads ROWSIZE at runtime, the way stock startup does, instead of assuming.

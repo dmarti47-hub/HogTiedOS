@@ -35,11 +35,56 @@ MAX_STORED = 0x2A00000            # IPL limit: one 42 MiB slot
 DRAM_END = 0x90000000             # 256 MiB, correct on both RAM variants
 
 PT_MAGIC = 0x584C5448             # "HTLX"
-PT_VERSION = 1
+PT_VERSION = 2
 PT_FMT = '<8I'                    # magic, version, kernel_off, kernel_size,
-PT_SIZE = 0x40                    # dtb_off, dtb_size, reserved x2
+PT_SIZE = 0x40                    # dtb_off, dtb_size, mem_cell_off, reserved
 ZIMAGE_MAGIC = 0x016F2818         # at zImage + 0x24
 FDT_MAGIC = 0xD00DFEED            # big-endian at DTB + 0
+
+# DRAM size. The DTB ships with 256 MiB (right on every unit). The shim reads
+# EMIF4 SDRAM_CONFIG ROWSIZE exactly like stock startup (0x80100A18) and, on
+# a 512 MiB unit, rewrites the memory node's size cell, whose offset within
+# the DTB is mem_cell_off.
+MEM_NODE = 'memory@80000000'
+MEM_BASE, MEM_SIZE_DEFAULT = 0x80000000, 0x10000000
+
+
+def fdt_mem_size_cell(dtb):
+    """Offset within the DTB of the size cell of /memory@80000000's reg.
+
+    Minimal flattened-device-tree walk (tokens BEGIN_NODE=1, END_NODE=2,
+    PROP=3, NOP=4, END=9). Requires reg = <base size> with one cell each
+    and base 0x80000000 / size 256 MiB, so the shim's patch is well-defined.
+    """
+    off_struct, off_strings = struct.unpack_from('>II', dtb, 8)
+    p, path = off_struct, []
+    while True:
+        tok = struct.unpack_from('>I', dtb, p)[0]
+        p += 4
+        if tok == 1:
+            end = dtb.index(b'\0', p)
+            path.append(dtb[p:end].decode())
+            p = align(end + 1, 4)
+        elif tok == 2:
+            path.pop()
+        elif tok == 3:
+            ln, nameoff = struct.unpack_from('>II', dtb, p)
+            p += 8
+            name = dtb[off_strings + nameoff:dtb.index(b'\0', off_strings + nameoff)].decode()
+            if path == ['', MEM_NODE] and name == 'reg':
+                if ln != 8:
+                    sys.exit(f'/{MEM_NODE} reg must be one address + one size cell')
+                base, size = struct.unpack_from('>II', dtb, p)
+                if (base, size) != (MEM_BASE, MEM_SIZE_DEFAULT):
+                    sys.exit(f'/{MEM_NODE} reg is {base:#x}+{size:#x}, expected 256 MiB at 0x80000000')
+                return p + 4
+            p = align(p + ln, 4)
+        elif tok == 4:
+            continue
+        elif tok == 9:
+            sys.exit(f'no /{MEM_NODE} reg property in the DTB')
+        else:
+            sys.exit(f'malformed DTB token {tok:#x}')
 
 
 def align(n, a):
@@ -87,8 +132,9 @@ def pack(shim, kernel, dtb):
 
     kernel_off = 0x1000
     dtb_off = align(kernel_off + len(kernel), 0x1000)
+    mem_cell_off = fdt_mem_size_cell(dtb)
     table = struct.pack(PT_FMT, PT_MAGIC, PT_VERSION, kernel_off, len(kernel),
-                        dtb_off, len(dtb), 0, 0).ljust(PT_SIZE, b'\0')
+                        dtb_off, len(dtb), mem_cell_off, 0).ljust(PT_SIZE, b'\0')
     payload = bytearray(table.ljust(kernel_off, b'\0'))
     payload += kernel
     payload += b'\0' * (dtb_off - len(payload))
@@ -134,7 +180,7 @@ def verify(image, name='image'):
     # HogTiedOS payload checks (skipped for stock QNX images)
     hogtied = len(image) >= st + PT_SIZE and struct.unpack_from('<I', image, st)[0] == PT_MAGIC
     if hogtied and not problems:
-        _, pver, koff, ksz, doff, dsz, _, _ = struct.unpack_from(PT_FMT, image, st)
+        _, pver, koff, ksz, doff, dsz, mcell, _ = struct.unpack_from(PT_FMT, image, st)
         plen = stored - st
         if pver != PT_VERSION:
             problems.append(f'payload table version {pver}')
@@ -144,6 +190,9 @@ def verify(image, name='image'):
             problems.append('no zImage magic at kernel_off')
         elif struct.unpack_from('>I', image, st + doff)[0] != FDT_MAGIC:
             problems.append('no FDT magic at dtb_off')
+        elif not (mcell % 4 == 0 and 0 < mcell < dsz and
+                  struct.unpack_from('>I', image, st + doff + mcell)[0] == MEM_SIZE_DEFAULT):
+            problems.append('mem_cell_off does not point at a 256 MiB size cell in the DTB')
         if (IPL_LOAD_ADDR + st + doff) % 8:
             problems.append('DTB would not be 8-byte aligned in RAM')
         if IPL_LOAD_ADDR + stored > DRAM_END:

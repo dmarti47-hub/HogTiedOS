@@ -7,11 +7,14 @@
  * image_paddr and patched header+0x28 (imagefs_paddr) to point at the
  * payload it left at 0x84000000 + startup_size.
  *
- * Job: find the payload table, print one line on UART3, and enter the Linux
- * zImage with the ARM boot protocol registers:
+ * Job: find the payload table, print one line on UART3, set the DTB memory
+ * size for 512 MiB units, and enter the Linux zImage with the ARM boot
+ * protocol registers:
  *   r0 = 0, r1 = 0xffffffff (DT-only boot), r2 = physical address of the DTB.
  *
- * This code never touches the DRAM controller, clocks, pads or NAND.
+ * Hardware access: writes only UART3; the one other access is a READ of
+ * EMIF4 SDRAM_CONFIG, the same read stock QNX startup does. It never writes
+ * the DRAM controller, clocks, pads or NAND (tested in tools/ifs-pack).
  * Position-independent: it only uses PC-relative addressing.
  */
 	.syntax unified
@@ -26,8 +29,15 @@
 
 	/* payload table (see mkifs.py) */
 	.equ	PT_MAGIC,	0x584c5448	/* "HTLX" */
+	.equ	PT_VERSION,	2
 	.equ	PT_KERNEL_OFF,	8
 	.equ	PT_DTB_OFF,	16
+	.equ	PT_MEM_CELL,	24		/* DTB offset of /memory size cell */
+
+	/* EMIF4 SDRAM_CONFIG: READ ONLY, exactly as stock startup does at
+	 * 0x80100A18. ROWSIZE[9:7] == 5 -> 512 MiB, else 256 MiB. */
+	.equ	EMIF4_SDRAM_CONFIG, 0x6d000008
+	.equ	SIZE_512M_BE,	0x00000020	/* 0x20000000 as a big-endian cell */
 
 	.global	_start
 _start:
@@ -39,14 +49,31 @@ _start:
 	ldr	r1, =PT_MAGIC
 	cmp	r0, r1
 	bne	bad_payload
+	ldr	r0, [r5, #4]
+	cmp	r0, #PT_VERSION
+	bne	bad_payload
 
 	adr	r0, msg_boot
 	bl	puts
 
 	ldr	r6, [r5, #PT_KERNEL_OFF]
 	add	r6, r5, r6			@ r6 = zImage entry
-	ldr	r2, [r5, #PT_DTB_OFF]
-	add	r2, r5, r2			@ r2 = DTB
+	ldr	r7, [r5, #PT_DTB_OFF]
+	add	r7, r5, r7			@ r7 = DTB
+
+	/* 512 MiB units: the DTB says 256 MiB; patch its size cell. */
+	ldr	r3, =EMIF4_SDRAM_CONFIG
+	ldr	r3, [r3]			@ read only
+	ubfx	r3, r3, #7, #3
+	cmp	r3, #5
+	bne	1f
+	ldr	r1, [r5, #PT_MEM_CELL]
+	mov	r3, #SIZE_512M_BE
+	str	r3, [r7, r1]			@ DTB is in DRAM; cell is 4-aligned
+	adr	r0, msg_512m
+	bl	puts
+1:
+	mov	r2, r7				@ r2 = DTB
 	mov	r0, #0
 	mvn	r1, #0				@ r1 = 0xffffffff: machine from DT
 	bx	r6
@@ -73,6 +100,8 @@ puts:
 	.ltorg
 msg_boot:
 	.asciz	"\r\nHogTiedOS shim: starting Linux\r\n"
+msg_512m:
+	.asciz	"HogTiedOS shim: 512 MiB RAM (EMIF4 ROWSIZE=5)\r\n"
 msg_bad:
 	.asciz	"\r\nHogTiedOS shim: bad payload table, halting\r\n"
 	.balign	4

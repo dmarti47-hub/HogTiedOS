@@ -34,6 +34,8 @@ UART_LSR = UART3 + 0x14
 # masks it and handles wrap, so any monotonic tick works.
 DELAY_COUNTER = 0x49030028
 IPL_LOAD_ADDR = 0x84000000   # the IPL reads the whole image here (measured)
+CONTROL_STATUS = 0x4800244C  # package strap input for the IPL's DDR setup
+EMIF4_SDRAM_CONFIG = 0x6D000008
 
 # GPMC (confirmed base 0x6E000000), CS0 NAND registers
 GPMC = 0x6E000000
@@ -152,8 +154,13 @@ class Eeprom:
 
 
 class IplEmu:
-    def __init__(self, ipl_file, nand=None, eeprom=None, verbose=False):
-        raw = open(ipl_file, 'rb').read()
+    def __init__(self, ipl_file, nand=None, eeprom=None, verbose=False,
+                 control_status=0):
+        """control_status seeds CONTROL_STATUS (0x4800244C). Bits [14:13]
+        are the package strap the IPL uses to pick EMIF4 ROWSIZE 5 (512 MiB
+        units) over 4 (256 MiB)."""
+        with open(ipl_file, 'rb') as f:
+            raw = f.read()
         size, load = struct.unpack_from('<II', raw, 0)
         assert load == SRAM_BASE, hex(load)
         self.body = raw[8:8 + size]
@@ -171,6 +178,8 @@ class IplEmu:
         for base, sz in [(0x48000000, 0x400000), (0x49000000, 0x100000),
                          (0x6c000000, 0x3000000), (PREFETCH_FIFO, 0x100000)]:
             u.mem_map(base, sz)
+        u.mem_write(CONTROL_STATUS, struct.pack('<I', control_status))
+        self.post_handoff_writes = []   # (pc, addr, value) MMIO writes after handoff
         # Hooks only on hardware windows: hooking all of DRAM is far too slow.
         for lo, hi in [(0x48000000, 0x483fffff), (0x49000000, 0x490fffff),
                        (0x6c000000, 0x6effffff), (PREFETCH_FIFO, PREFETCH_FIFO + 0xfffff)]:
@@ -248,6 +257,8 @@ class IplEmu:
 
     # --- hardware models -------------------------------------------------
     def _on_write(self, uc, access, addr, size, value, _):
+        if self.handoff is not None:
+            self.post_handoff_writes.append((uc.reg_read(UC_ARM_REG_PC), addr, value))
         if addr == NAND_CMD:
             self.nand.command(value & 0xff)
         elif addr == NAND_ADDR:
