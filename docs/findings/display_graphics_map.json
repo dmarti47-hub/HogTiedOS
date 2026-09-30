@@ -1,0 +1,116 @@
+{
+ "subsystem": "Display and graphics",
+ "source": "swdl_boombox_6.5GT.iso NA 1.22.0.3, same hashes as prior sessions",
+ "panel_and_timing": {
+  "active_config_file": "/etc/system/config/omap3530.conf (referenced by display.conf's modeopts field)",
+  "active_entry_label": "'Harley standard display 400x234' -- this is the entry with NO leading '#', i.e. the one actually in effect on your unit",
+  "raw_timing_params": "hsw=2,hfp=34,hbp=84,vsw=1,vfp=32,vbp=17,ivs=1,ihs=1,ipc=1,ieo=0x4,acb=0,acbi=0,pcd=0xb,ppl=400,lpp=234,irq=25,disptype=3,lcdfmt=0x1,tw4030=0,ccoef=0",
+  "decoded": {
+   "resolution": "400 x 234 active pixels (NOT 400x240 -- the '240' figure commonly quoted for this unit is the panel's physical line count; 6 lines are outside the active display window)",
+   "horizontal_total": 520,
+   "vertical_total": 284,
+   "pixel_clock_divisor": 11,
+   "sync_polarity": "vsync and hsync both active-low (ivs=1, ihs=1); pixel data sampled on rising edge (ipc=1)",
+   "color_format": "16-bit TFT (lcdfmt=0x1), matches display.conf's pixel_format=rgb565",
+   "lcd_controller_irq": 25
+  },
+  "there_is_also_a_commented_out_240_line_variant": "'Harley premium display 400x240' (hsw=1,hfp=35,hbp=88,...,ppl=400,lpp=240,pcd=0xa,...) is present in the same file but disabled with a leading '#'. If your specific unit is the 76000076 (Premium, NA) part number rather than a Standard radio, the true active config might actually be this alternate entry -- the file ships both, and whichever config.txt/build selects at image-build time decides which one is truly live. Treat the 400x234 entry as the one active in THIS firmware image as extracted, but verify against your actual screen behavior (0.jpg border/overscan) if precision matters.",
+  "pixel_clock_derivation": "Cross-checked against display.conf's declared refresh=60: with pcd=11 and the OMAP3530 DSS functional clock at 96MHz (the same 96MHz DPLL4 derivation independently confirmed for McBSP/McSPI in the boot-path session), pixel clock = 96MHz/11 = 8.727MHz, giving htotal=520 x vtotal=284 -> ~59.1Hz frame rate. This matches the declared 60Hz closely enough to confirm the 96MHz DSS clock assumption is correct -- good independent cross-validation between sessions.",
+  "confidence": "High on the raw timing numbers (read directly from the live config file). Medium on which of the two timing entries (234 vs 240 active lines) is truly the one running on your specific unit -- both exist in this firmware."
+ },
+ "display_controller": {
+  "driver": "devg-omap35xx.so (QNX Photon/Screen graphics driver for the OMAP35xx display subsystem, DSS)",
+  "resource_manager": "io-display, config-driven via /etc/system/config/display.conf",
+  "supported_pixel_formats_in_io_display": [
+   "rgb565 (in use)",
+   "argb1555",
+   "argb8888"
+  ],
+  "vid_did": "vid=0, did=0 in display.conf -- generic/no PCI-style vendor-device pair, expected for an embedded SoC display block"
+ },
+ "gpu": {
+  "identification_carried_over_from_earlier_session": "RESOLVED THIS ROUND, high confidence.",
+  "driver_stack": [
+   "pvrsrvd (PowerVR services daemon)",
+   "libpvr2d.so",
+   "pvrsrvinit.so",
+   "libWFD.so.1 / libWFDdevg.so (Khronos WFD compositing layer)"
+  ],
+  "pvr_ddk_version_string": "VERSION=650-3378 (this is a QNX package build number, not the SGX silicon revision)",
+  "two_alternate_flash_configs_confirm_gpu_is_optional_for_bringup": {
+   "sgx_flash.conf": "uses flashlite-vg.so + hmip-openvg.so extension -- hardware-accelerated OpenVG rendering through the SGX GPU",
+   "flash_nosgx.conf": "uses flashlite-8888.so -- plain 32-bit ARGB software rendering, GPU not required",
+   "implication_for_a_replacement_OS": "The stock software explicitly supports running the whole UI stack WITHOUT the SGX GPU at all (flash_nosgx.conf exists and is a complete, working alternate config, not a stub). This substantially lowers the bring-up bar for any custom OS: a working software framebuffer (rgb565, 400x234, DSS/devg-omap35xx-equivalent pixel pump) is enough to reach a usable UI. SGX/GPU acceleration can be treated as a stretch goal added later, not a blocker."
+  },
+  "confirmed_sgx530": {
+   "evidence_1": "Literal string 'SGX530' found verbatim in libImgGLESv1_CM.so and libusc.so (re-verified directly against the extracted files, not carried over from memory)",
+   "evidence_2": "devg-omap35xx.so maps its GPU register block at MMIO base 0x5D000000 -- this is the documented, correct OMAP3530 SGX530 register base address. Two independent pieces of evidence (a literal string AND the correct hardware register address) now agree.",
+   "confidence": "High"
+  }
+ },
+ "compositor_and_winmgr": {
+  "confirmed_boot_sequence": "io-winmgr starts before pvrsrvd in the primary startup script (from the swdl-premium.sh excerpt seen previously: 'io-winmgr' then '/usr/lib/graphics/omap3530/pvrsrvd')",
+  "note": "Screen/Photon-style compositor (io-winmgr) sits above the raw devg-omap35xx display driver; the Flash Lite UI runtime (flashlite-8888.so or flashlite-vg.so) renders into that compositor, not directly to the framebuffer."
+ },
+ "still_open": [
+  "Resolve which of the two timing entries (400x234 vs 400x240) is truly active on THIS specific 2015 unit -- both exist in the shipped config file (unchanged from before)",
+  "Exact DISPC-level register programming sequence (LCD timing registers, frame buffer base pointer setup) -- traced the MMIO map and power-GPIO sequencing, but not the full DISPC timing-register write sequence",
+  "Exact IPC message format for SetDisplayBrightness over ch3"
+ ],
+ "mmio_register_map_CONFIRMED": {
+  "source": "devg-omap35xx.so init routine, disassembled directly (function starting ~offset 0x9200); every region below is mapped via mmap_device_memory with PROT flags 0xB00, 4KB windows",
+  "note": "All addresses below independently match the standard, publicly documented OMAP3530 TRM memory map. This is a useful contrast with the DDR/SDRC controller from the boot-path session, whose addresses did NOT match published OMAP3530 documentation -- the display/graphics block on this DRA52x chip appears to be much closer to (or identical to) mainline OMAP3530, unlike the memory controller.",
+  "regions": {
+   "0x48050000": "DSS (Display Subsystem top-level)",
+   "0x4804fc00": "DSI protocol engine",
+   "0x4804ff00": "DSI PLL controller",
+   "0x5d000000": "SGX530 GPU registers",
+   "0x48004000": "CM (Clock Manager) -- consistent with CM references already confirmed in the boot-path session",
+   "0x48002030": "CONTROL_PADCONF region (pin muxing)",
+   "0x48200000": "INTC (interrupt controller)",
+   "0x48310000": "GPIO1",
+   "0x49056000": "GPIO5",
+   "0x49058000": "GPIO6"
+  }
+ },
+ "display_power_gpio_cross_reference": {
+  "finding": "devg-omap35xx.so actively drives GPIO6 pins 169 and 170 during display init: pin 169's output-enable is cleared on three related control registers, and pin 170 is driven high (SETDATAOUT bit 0x400) as part of bringing the panel up.",
+  "cross_session_link": "GPIO6 pin 170 is the SAME physical pin the DSP-reverse-engineering session found being released by the power-amplifier class (CAudioCtrlSvcPwrAmp) as part of DSP/amp reset sequencing. Combined with omap3530.conf's own comment ('dpowerg70 -- GPIO_170 used for power control DVI'), this strongly suggests GPIO170 is a SHARED board-level power-enable line -- not a DSP-only or display-only reset -- most likely a master panel+amp power-enable gated by a single board supply rail.",
+  "revision_to_earlier_session": "This should be read as an update to the DSP session's GPIO170 finding: it's now corroborated from a second, independent driver (display) doing the same thing, which raises confidence that GPIO170 is a shared enable rather than being specific to either subsystem alone. A replacement OS's power-sequencing code needs to bring this pin up before EITHER audio or display will function, and should treat it as one shared step, not two separate subsystem-specific resets."
+ },
+ "backlight_path": {
+  "resolved": "No PWM/GPT (general-purpose timer) register block is mapped anywhere in devg-omap35xx.so's init routine -- only the MMIO regions listed above (DSS/DSI/SGX/CM/PADCONF/INTC/GPIO1/GPIO5/GPIO6). This means backlight brightness is NOT controlled by the OMAP SoC itself.",
+  "conclusion": "Combined with the front/IO-controller session's finding that SetDisplayBrightness talks over /dev/ipc/ch3 (the front-controller SPI link) rather than any OMAP peripheral, the backlight PWM generation almost certainly happens on the 78K0R front-controller side, off-chip from the main SoC entirely. A replacement OS does not need an OMAP-side PWM/backlight driver -- brightness control is just another IPC message over the already-documented ch3 link.",
+  "confidence": "Medium-high -- this is an absence-of-evidence conclusion (no PWM block mapped) combined with the earlier positive finding (SetDisplayBrightness writes to ch3), which together make a solid case, though I have not traced the exact IPC message format brightness uses."
+ },
+ "dispc_register_sequence_TRACED": {
+  "source": "devg-omap35xx.so init routine, disassembled instruction-by-instruction (file offset ~0x9200-0x9dd0)",
+  "confirmed_soft_reset": {
+   "step1": "write 2 to DISPC_SYSCONFIG (0x48050410) -- triggers a soft reset",
+   "step2": "poll DISPC_SYSSTATUS (0x48050414) bit 0 (RESETDONE) in a tight loop until set",
+   "confidence": "High -- this exact write-then-poll pattern is the textbook OMAP3 DISPC soft-reset procedure. Independently confirmed both by matching register offsets (from a public u-boot OMAP3 DSS header) AND by the code's behavior matching the documented reset semantics -- two independent lines of evidence agreeing."
+  },
+  "register_offset_table_from_DISPC_BASE_0x48050400": {
+   "0x00": "SYSCONFIG (confirmed: soft-reset trigger)",
+   "0x04": "SYSSTATUS (confirmed: reset-done poll)",
+   "0x40": "CONTROL -- confirmed as the target of a composite write built from panel parameters (pcd-derived shift, plus 'orr #9' setting at least 2 bits); exact bit-for-bit meaning of the composite value NOT resolved",
+   "0x74": "GLOBAL_ALPHA -- CORRECTED this round. Earlier I mislabeled this offset as 'DISPC_DIVISOR'; re-examination shows it's an 8-bit masked field (clear/set/OR with 0xFF) written repeatedly, matching GLOBAL_ALPHA's real 8-bit format from the u-boot OMAP3 DSS header, not the pixel-clock divisor.",
+   "0xa0": "GFX_ATTRIBUTES",
+   "0xa4": "GFX_FIFO_THRESHOLD (confirmed: packed two-field value)"
+  },
+  "still_not_decoded": "DISPC_TIMING_H (0x64), DISPC_TIMING_V (0x68), DISPC_POL_FREQ (0x6c) and DISPC_DIVISOR (0x70) were searched for exhaustively across the ENTIRE devg-omap35xx.so binary this round (every store instruction to offsets 0x64/0x68/0x6c/0x70 relative to any register, and every 'add rX,#0x464/0x468/0x46c/0x470' pattern relative to the confirmed DSS-window pointer). None were found. This is a genuine, notable result rather than a search failure: either (a) this driver programs horizontal/vertical timing through a different path entirely -- plausible, since the active panel config uses disptype=3 (a non-standard/custom bypass mode per the config file's own comments, distinct from the DVI/VGA disptype=0/1/2 modes used on reference boards) -- or (b) timing programming happens in a function this reverse-engineering pass didn't reach (the binary is 0xdca0 bytes; only regions reachable from the init routine and a few directly-referenced helpers were examined). Concluding this further would need either tracing every function in the binary systematically (a much larger effort) or a live register capture during actual boot."
+ },
+ "panel_timing_selection_RESOLVED": {
+  "conclusion": "400x234 (the 'Harley standard display' entry) is the ONLY timing configuration active in this exact firmware image.",
+  "reasoning": "omap3530.conf is a flat text file where 'the driver will use the first un-commented entry' (per the file's own header comment). Exactly one line has no leading '#': the 400x234 entry. The 400x240 'premium' entry is present but disabled. No code path was found anywhere in the extracted firmware that swaps this config file or re-enables the alternate line based on radio trim (Standard vs Premium) or any runtime detection -- display.conf's modeopts always points at this single file.",
+  "practical_implication": "For THIS firmware version (NA 1.22.0.3), 400x234 is definitively what runs on both Standard and Premium 6.5GT hardware. The commented-out 240-line entry is most likely leftover from an earlier panel revision or a different board, not something selected at runtime. A replacement OS's display driver should use the 400x234 timing with high confidence.",
+  "confidence": "High for this firmware version. If you have physical access at some point, worth a quick visual sanity check (any visible black border/overscan) since this conclusion rests on there being no out-of-band selection mechanism I haven't seen."
+ },
+ "brightness_ipc_format_PARTIALLY_RESOLVED": {
+  "source": "SetDisplayBrightness utility, fully disassembled",
+  "finding_1": "Unlike the 'reset' utility (which does a plain write() of 2 raw bytes to /dev/ipc/ch2), SetDisplayBrightness uses devctl()-style messaging on /dev/ipc/ch3, not a simple write. This is a materially different, more structured IPC pattern than the reset command.",
+  "finding_2": "The brightness value (passed to the program) is packed as a 2-byte big-endian field within a small fixed-layout message structure. The surrounding structure includes what look like fixed header/size fields (a constant 0x50, paired 2-byte size fields, a zero field) before the brightness payload, and the whole thing is sent in a loop that can chunk larger payloads into 0x20-byte pieces -- suggesting this is a generic 'send arbitrary bytes to the IOC over channel 3' helper being reused for brightness specifically, not a brightness-only protocol.",
+  "not_resolved": "The exact devctl command/DCMD code number and the precise byte-for-byte layout of the header fields (their semantic meaning, e.g. which byte is a 'target device ID' vs 'command type') -- decoding this fully would need either the actual 'Harley IOC J3 IPC Interface' document referenced in the front-controller session, or live bus capture.",
+  "practical_implication": "A replacement OS's brightness control cannot yet be built purely from this analysis -- we know channel 3, we know brightness is a 16-bit big-endian value in a structured devctl message, but not the exact wire bytes. This is the one item from this round that still needs either the source document or hardware access to fully close."
+ }
+}

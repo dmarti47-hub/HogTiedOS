@@ -1,0 +1,68 @@
+{
+ "subsystem": "Front / I-O controller link (SPI3 <-> 78K0R microcontrollers)",
+ "source": "swdl_boombox_6.5GT.iso NA 1.22.0.3, same hashes as prior sessions",
+ "physical_link": {
+  "bus": "McSPI3, OMAP register base 0x480B8000, IRQ 91",
+  "args_at_every_boot": "spi-master -u3 -domap3530 base=0x480B8000,bitrate=125000,clock=48000000,irq=91,channel=3,force=0,num_cs=2,cs_delay=1",
+  "device_node": "/dev/spi3",
+  "chip_selects": "2 (num_cs=2) -- confirms the SPI3 bus is shared between the two 78K0R microcontrollers (front controller + IOC), one per CS",
+  "confirmed_boot_gating": "waitfor /dev/spi3 blocks the rest of primary startup until the SPI driver is up; dev-ipc is started immediately after and everything else (touch/buttons/display backlight/CAN gateway/boot-mode) waits on dev-ipc's mount points"
+ },
+ "transport_layer": {
+  "driver": "/boot/bin/dev-ipc, VERSION 2.3.0 -- this is a generic, documented Harman 'ipc/spi driver' resource manager, NOT a Harley-specific protocol at this layer",
+  "invocation_every_boot": "dev-ipc -c8 -o -M3 -C0 -D0x608 -K1000000 -A50 -I136,137",
+  "args_decoded": {
+   "-c8": "8 virtual channels multiplexed over the one physical SPI link",
+   "-o": "force IPC on at start",
+   "-M3 -C0": "SPI module 3, SPI channel/CS 0 (the front controller; CS1 -- channel 1 -- is presumably the second 78K0R, not seen invoked separately in these scripts)",
+   "-D0x608": "SPI mode word (polarity/phase/word-size bits, same style as the audio DSP's McSPI2 mode word found earlier)",
+   "-K1000000": "1 MHz SPI clock for this link (higher than the DSP's SPI0 6 MHz derivation, lower than max -- likely chosen for the 78K0R's slower peripheral clock)",
+   "-A50": "50ms ACK timeout",
+   "-I136,137": "two OMAP interrupt lines used as IPC_REQ / IPC_ACK handshake signals -- this means the link is NOT simple polled SPI; the 78K0R actively interrupts the OMAP to signal 'I have data' and 'I got your data', on top of the raw SPI clock/data lines. A software reimplementation MUST wire these two IRQs, not just bit-bang SPI."
+  },
+  "flow_control": "XON/XOFF flow control per channel, visible in dev-ipc's own diagnostic strings (rx/tx XOFF|XON counters) -- the link can be throttled per virtual channel independently",
+  "protocol_versions": "dev-ipc supports IPC protocol V1.0 (default) and V2.0 via -p; which version this firmware actually negotiates was not confirmed (no explicit -p flag in any boot script, so it defaults to V1.0)",
+  "resulting_device_tree": "/dev/ipc/ch0 .. ch7, /dev/ipc/onoff, /dev/ipc/watchdog, /dev/ipc/debug -- each is a plain QNX character device from userspace's point of view; dev-ipc handles all SPI/interrupt/flow-control plumbing underneath"
+ },
+ "channel_map": {
+  "confirmed_from_actual_usage_in_firmware": {
+   "ch2": "power/reset control -- the stock 'reset' utility does the entire reset request by writing 2 raw bytes (0x00 0x02) to /dev/ipc/ch2. This is the single simplest, most directly reusable fact in this whole session: `echo -ne '\\x00\\x02' > /dev/ipc/ch2` is a real, documented way to trigger a system reset through this link.",
+   "ch3": "front-panel buttons, touchscreen, and display backlight -- owned by iocInterface and SetDisplayBrightness. iocInterface also manages touch calibration (reads/writes EEPROM offset from mmap_eeprom.cfg's 'touchCal' field, 0x1874/28 bytes, found in the boot-path session) and posts key/touch events to /dev/faceplate for the rest of the system to consume.",
+   "ch5": "speech recognition front-end (started by the 'ndr' service) -- likely carries streamed audio or VR-button-press events, not confirmed further",
+   "ch8": "boot-mode negotiation -- ioc-boot-mode reads this channel at both normal boot and SWDL boot to ask the 78K0R which mode to come up in (letters mapped to codes 66/70/85 = 'B'/'F'/'U', matching the boot-path session's SWDL trigger condition)"
+  },
+  "unconfirmed": "ch0, ch1, ch4, ch6, ch7 -- allocated (8 channels total) but no script in this firmware exercises them directly; they may be used only from compiled services (audioCtrlSvc referenced /dev/ipc/ch2 as well per an earlier session's string dump, worth reconciling) or may be reserved/unused in this hardware variant."
+ },
+ "front_panel_message_format_CONFIRMED_FROM_COMMENTS": {
+  "source": "Verbatim comment block in the stock multipleKeyMaps.cfg, citing an internal spec by name: '//Harley/isys/iocontroller/trunk/doc/Harley IOC J3 IPC Interface.doc', Section 2.3.1.3",
+  "meaning": "This CONFIRMS a real, named internal protocol document exists (title: 'Harley IOC J3 IPC Interface'). We don't have that document, but the firmware comments quote its exact bit layout for the digital-keys field of the Front Controls IPC message:",
+  "byte5_bits": {
+   "0": "POWER",
+   "1": "INT",
+   "2": "COMM",
+   "3": "NAV",
+   "4": "AUX_JACK",
+   "5": "BACKLIGHT_FAULT",
+   "6": "unassigned",
+   "7": "unassigned"
+  },
+  "byte6_bits": {
+   "0": "PRESET1",
+   "1": "PRESET2",
+   "2": "PRESET3",
+   "3": "PRESET4",
+   "4": "PRESET5",
+   "5": "PRESET6",
+   "6": "PRESET7",
+   "7": "PRESET8"
+  },
+  "example_multi_key_decode": "config line '0x0007=0x42' means bits 0,1,2 of byte5 (POWER+INT+COMM) held together maps to ASCII 'B'; this is purely a host-side software combo table, not something the 78K0R itself encodes -- the 78K0R just reports raw button-state bits per message, and iocInterface does the combo detection in software using this table.",
+  "implication_for_a_replacement_OS": "A replacement front-panel driver does NOT need to reverse-engineer combo/multi-key logic from the wire protocol -- it only needs the raw per-button bitmask from the 78K0R (bytes 5/6 as documented above) and can reimplement combo detection in software exactly like iocInterface does, using this same authoritative bit table."
+ },
+ "still_open": [
+  "Full SPI frame structure that dev-ipc uses to carry the 8 virtual channels (header format, per-channel framing, checksum if any) -- dev-ipc is a generic Harman component so this may be identical across other Harman/QNX automotive designs; worth searching for a public 'dev-ipc' or 'Harman IPC' spec independent of this specific firmware",
+  "The exact byte offsets of the 'Front Controls IPC message' beyond bytes 5/6 (button-state bytes) -- e.g. where touch coordinates, backlight-fault detail, or preset-store timing live in the same message",
+  "CAN gateway framing over this same link, if it in fact goes over dev-ipc at all (channel not yet identified with confidence)",
+  "Whether channel numbering / CS assignment is identical between the front controller and the second ('IOC') 78K0R, or whether they use different channel ranges on the same shared SPI3 bus"
+ ]
+}

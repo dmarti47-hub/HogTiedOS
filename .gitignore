@@ -1,0 +1,7 @@
+# handoff.zip is a byte-identical copy of docs/findings/
+handoff.zip
+
+# Buildroot output / download cache
+output/
+dl/
+*.o

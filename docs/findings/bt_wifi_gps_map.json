@@ -1,0 +1,67 @@
+{
+ "subsystem": "Bluetooth, Wi-Fi, GPS, SDARS",
+ "source": "swdl_boombox_6.5GT.iso NA 1.22.0.3, same hashes as prior sessions",
+ "bluetooth_wifi_chip": {
+  "identification": "Marvell 88W8688, confirmed by three independent verbatim strings in the driver binary (DEVNP_MV.SO): 'ConneXt SDIO Driver for Marvell 88W8688 uAP', 'DESCRIPTION=Marvell_SD8688_Wireless_STA2X11_Ethernet_Driver', 'Marvell 88W8688uAP'",
+  "usb_sdio_ids": "SDIO vendor ID 0x02DF (Marvell), default chip/product ID 0x3130 -- both taken directly from the driver's own usage text, not inferred",
+  "confidence": "High -- this is a direct string match, not circumstantial",
+  "physical_link": "SDIO, via /mnt/persistence/wicome/wicomeBin/dev-sdio",
+  "sdio_controller": "ioport=0x480AD000, irq=94 -- on OMAP3530 this is MMC3 (the third of three SD/MMC host controllers on the chip)",
+  "unused_secondary_slot": "bluetooth.sh has a commented-out second dev-sdio invocation at ioport=0x480B4000 (MMC2), irq=86, labeled 'Secondary BT chip'. This is disabled in the shipped firmware -- only one Marvell 88W8688 is actually used, but the board/software supports a second one, suggesting some hardware revision or a different Harley model may populate a second radio module.",
+  "middleware_stack": "'Wi-Comm' (Qualcomm/proprietary automotive BT+WiFi stack, component prefix 'wicome' throughout the firmware): scp (service control point) daemon, btservice (Bluetooth profile handling via pal.lua), DbService (phonebook/database), servicebroker (DSI service bus), io-fs-media (media-over-Bluetooth filesystem), HCI transport library (libhcitr.so) -- a fairly complete off-the-shelf automotive BT/WiFi middleware, not something Harley wrote from scratch.",
+  "bt_audio_clock": "A small dedicated utility, BTClockSet <mcbsp=x> (source file BTClockSet.c, confirmed from its own usage/error strings), configures the McBSP clock generator for Bluetooth SCO audio at boot. This matches and confirms the McBSP2-for-Bluetooth-audio finding from the very first DSP-analysis session -- BTClockSet is almost certainly what programs that McBSP2 SRG to the ~12.288MHz figure noted back then, though the exact register values weren't re-traced this round.",
+  "wifi_networking_path": "Separate from the Bluetooth-audio SDIO chip: the earlier boot-path/USB sessions already found a USB-Ethernet dongle path (D-Link/Cisco adapters via devn-asix.so) for wired network diagnostics. The 88W8688's own WiFi station interface is present in the driver (STA2X11) but no script in this firmware was found actually bringing up 88W8688 WiFi networking for general internet use -- it appears to be used for Bluetooth (and possibly WiFi-based phone pairing/CarPlay-adjacent features) rather than general internet access.",
+  "btclockset_this_round": {
+   "attempted": "Searched for the actual McBSP SRG register writes BTClockSet performs",
+   "result": "BTClockSet.c's binary (BTCLOCKS. in the ISO's APP/USR/BIN, confirmed present) was located and its usage/error strings read ('Usage: BTClockSet <mcbsp=x>', 'Failed to map McBSP registers', 'mcbsp_init'), confirming it takes an McBSP index and maps that peripheral's registers directly. Did not re-disassemble its actual SRG divisor computation this round -- the concrete register values for the ~12.288MHz Bluetooth SCO clock remain from the original session's estimate, not independently re-verified.",
+   "recommendation": "If Bluetooth SCO audio clocking becomes a near-term blocker, this specific ~4KB-ish utility is a good, bounded next target -- small enough to fully disassemble in one pass, unlike the DISPC or GPS-decode searches which turned out to span much larger binaries."
+  }
+ },
+ "gps": {
+  "receiver": "u-blox G5 (or G6-compatible; the driver auto-detects both, confirmed from vdev-flexgps's own capability strings in the original session)",
+  "uart": "UART2 on OMAP3530 (MMIO base 0x4806C000, IRQ 73), exposed as /dev/ser3",
+  "startup_sequence": [
+   "devc-seromap starts /dev/ser3 at 9600 baud (u-blox factory default) -- 'devc-seromap -E -F -u3 -b9600 -c48000000/16 0x4806C000^2,73'",
+   "A single u-blox proprietary NMEA-style config sentence is sent directly to the port BEFORE the GPS driver daemon even starts: '$PUBX,41,1,0007,0003,57600,0*2B'",
+   "vdev-flexgps then starts, using /dev/ser3 at the new 57600 baud"
+  ],
+  "PUBX41_decoded": {
+   "sentence": "PUBX,41 = u-blox 'SET PROT' proprietary command (sets port protocol and baud rate)",
+   "port_id": "1 (the receiver's UART1)",
+   "in_protocols": "0x0007 = UBX + NMEA + RTCM all enabled on input",
+   "out_protocols": "0x0003 = UBX + NMEA enabled on output, RTCM output disabled",
+   "baud_rate": "57600",
+   "autobauding": "0 (disabled)",
+   "practical_implication": "A replacement OS's GPS bring-up is now fully specified: open /dev matching UART2 at 9600, send this exact PUBX sentence, then reopen/reconfigure the port at 57600 and read standard NMEA + UBX binary frames. This is a complete, ready-to-implement sequence, not an inference."
+  },
+  "reset_line": "GPIO112 (GPSReset), previously confirmed in the very first boot-path session's gpio-harley.conf reading -- exposed to vdev-flexgps via '-P/dev/gpio/GPSReset'",
+  "config_blob": "/usr/share/vdev-flexgps/g5.cfg, 1725 bytes -- appears to be a binary/compressed or encoded u-blox configuration blob (not human-readable text, not a standard UBX-CFG frame at a glance). Not decoded this round; would need either format documentation or a byte-level pass specifically on this file.",
+  "flexgps_max_baud": "-C115200 -- a secondary, higher baud rate flexgps knows about, used for firmware-update mode per the original session's -C flag documentation ('Baudrate that will be used to configure the receiver... e.g. uBlox G5/G6'), not the normal operating baud",
+  "config_blob_analysis_this_round": {
+   "entropy_test": "1725 bytes, Shannon entropy 7.88 bits/byte, all 256 byte values present -- consistent with compression or encryption, NOT a plain/lightly-obfuscated binary structure",
+   "single_byte_xor_test": "Brute-forced all 256 single-byte XOR keys against the file header; best result recovered only 22 of 40 header bytes as printable ASCII -- no clean key found. Simple XOR obfuscation is ruled out.",
+   "structural_metadata_recovered_instead": "vdev-flexgps's own error-message strings reveal the DECODED (post-processing) file's header layout, even though the on-disk bytes themselves resist casual decoding: 4-char magic, 5-char config version, 3-char firmware version, 10-char date, 2-char cycle-time field, 4-char hardware ID, 6-char product ID, then a checksum. The driver explicitly logs 'decoded %dbytes (%dbytes exp.)' confirming there IS a real decode/decompress step, not raw storage.",
+   "vendor_identification_bonus": "vdev-flexgps's error strings are in German ('Checksumme', abbreviated field names) -- this driver is very likely licensed from a German automotive tier-1 (Bosch/Blaupunkt-class supplier), consistent with 'FlexGPS' being a known automotive GPS abstraction layer name, not a Harley-authored component.",
+   "conclusion": "Full byte-level decode was NOT achieved this round. This resists casual static analysis -- it needs either tracing the actual decode function inside vdev-flexgps (a substantial disassembly effort, since the reference could not be located via literal-pool or movw/movt scanning, suggesting an indirect jump table or PIC-relative addressing scheme not yet reverse engineered) or vendor documentation. Recommend treating this as needing a dedicated future session if it becomes a blocker, rather than something to force through quickly.",
+   "practical_workaround": "None of this blocks GPS bring-up on a replacement OS -- the PUBX,41 sequence documented last session is sufficient to get the receiver talking standard NMEA/UBX. g5.cfg appears to carry supplementary receiver tuning (possibly AssistNow/almanac seed data or antenna/LNA calibration), not something required for basic operation."
+  }
+ },
+ "sdars_siriusxm": {
+  "uart": "UART1 on OMAP3530 (MMIO base 0x4806A000, IRQ 72), exposed as /dev/ser5",
+  "baud": "57600",
+  "gating": "Only started if GPIO94 (SDARSPresent, confirmed in the original boot-path session) reads high -- 'if [ \"$(cat /dev/gpio/SDARSPresent)\" == \"SDARSPresent is 1\" ]'. This means the SDARS/SiriusXM module is a field-optional daughter-card, and the firmware detects its physical presence via a strap pin before even opening the UART.",
+  "practical_implication": "A replacement OS should read GPIO94 first and skip SDARS UART setup entirely if it reads absent -- exactly mirroring stock behavior -- rather than assuming the module is always populated."
+ },
+ "complete_uart_map_this_session": {
+  "note": "Combining this session's findings with the confirmed debug-console UART from the boot-path session gives a complete map of all three OMAP3530 UARTs in use:",
+  "UART1_0x4806a000": "/dev/ser5 -- SDARS/SiriusXM, 57600 baud, gated on GPIO94",
+  "UART2_0x4806c000": "/dev/ser3 -- GPS (u-blox), 9600 then 57600 baud",
+  "UART3_0x49020000": "/dev/ser1 -- debug console, 115200 baud (from the boot-path session)"
+ },
+ "still_open": [
+  "Decode the binary g5.cfg GPS configuration blob",
+  "Exact McBSP2/BTClockSet register values for Bluetooth SCO audio clocking (found the utility and confirmed its purpose, didn't re-disassemble its register writes this round)",
+  "Whether 88W8688 WiFi is used for anything beyond Bluetooth in this firmware, or is entirely dormant hardware",
+  "SDARS antenna/tuner protocol details beyond the UART/GPIO gating (the actual SiriusXM data protocol over that UART was not examined)"
+ ]
+}

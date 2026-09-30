@@ -1,0 +1,444 @@
+{
+ "source": "audioCtrlSvc from official Boom! Box 6.5GT NA 1.22.0.3 (sha256 a199b880...)",
+ "confidence": "Table contents read directly from firmware data at vaddr 0x14d3dc; feature semantics NOT yet labeled. Nothing here has been observed on hardware.",
+ "layout_table_vaddr": "0x14d3dc",
+ "entry_size_bytes": 12,
+ "absent_marker": "halfword 0xFFFF (-1)",
+ "spi_framing": {
+  "tx": "[cmd][addr_hi][addr_lo][payload...]",
+  "cmd_read": 1,
+  "cmd_write": 0,
+  "word_bytes": 4,
+  "word_valid_bits": 28,
+  "byte_order": "big-endian on wire"
+ },
+ "spi_master": "McSPI2 CS0 (/dev/spi0) 6 MHz mode0 8-bit CS-low for whole transfer (from startup args + CHCONF replay)",
+ "safeload": {
+  "descriptor": "table entry 0",
+  "max_words": 60,
+  "sequence": [
+   "write data words at base+4",
+   "write 4-byte word [0,0,target_hi,target_lo] at base",
+   "write 4-byte word [0,0,0,nwords] at base+2"
+  ],
+  "base_from_entry0_halfword_at_4": 3
+ },
+ "biquad": {
+  "table_index": 4,
+  "first_biquad_addr": "base + 0x25",
+  "stride_words": 5,
+  "max_per_set": 7,
+  "wire_word_order": "B2,B1,B0,A2,A1",
+  "address_of_biquad_i": "185 + 37 + 5*i = 222 + 5*i"
+ },
+ "layout_table": [
+  {
+   "index": 0,
+   "raw_hex": "3cff00000300d01fffffffff",
+   "byte0": 60,
+   "byte1": 255,
+   "byte2": 0,
+   "base_addr": 3,
+   "aux_halfword_6": 8144,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 1,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 2,
+   "raw_hex": "1f1f01007b001400ffffffff",
+   "byte0": 31,
+   "byte1": 31,
+   "byte2": 1,
+   "base_addr": 123,
+   "aux_halfword_6": 20,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 3,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 4,
+   "raw_hex": "02020100b9001600c300ffff",
+   "byte0": 2,
+   "byte1": 2,
+   "byte2": 1,
+   "base_addr": 185,
+   "aux_halfword_6": 22,
+   "aux_halfword_8": 195
+  },
+  {
+   "index": 5,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 6,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 7,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 8,
+   "raw_hex": "080a0000c701ffffffffffff",
+   "byte0": 8,
+   "byte1": 10,
+   "byte2": 0,
+   "base_addr": 455,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 9,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 10,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 11,
+   "raw_hex": "0a0a00001702ffff81015f05",
+   "byte0": 10,
+   "byte1": 10,
+   "byte2": 0,
+   "base_addr": 535,
+   "aux_halfword_6": null,
+   "aux_halfword_8": 385
+  },
+  {
+   "index": 12,
+   "raw_hex": "0a0a010055042e00ffffffff",
+   "byte0": 10,
+   "byte1": 10,
+   "byte2": 1,
+   "base_addr": 1109,
+   "aux_halfword_6": 46,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 13,
+   "raw_hex": "0a0a00006904ffffffffffff",
+   "byte0": 10,
+   "byte1": 10,
+   "byte2": 0,
+   "base_addr": 1129,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 14,
+   "raw_hex": "0a0a01000d042c00ffffffff",
+   "byte0": 10,
+   "byte1": 10,
+   "byte2": 1,
+   "base_addr": 1037,
+   "aux_halfword_6": 44,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 15,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 16,
+   "raw_hex": "030300004300ffffffffffff",
+   "byte0": 3,
+   "byte1": 3,
+   "byte2": 0,
+   "base_addr": 67,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 17,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 18,
+   "raw_hex": "ffffff00ffffffffffffffff",
+   "byte0": 255,
+   "byte1": 255,
+   "byte2": 255,
+   "base_addr": null,
+   "aux_halfword_6": null,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 19,
+   "raw_hex": "020200005900ffff5600ffff",
+   "byte0": 2,
+   "byte1": 2,
+   "byte2": 0,
+   "base_addr": 89,
+   "aux_halfword_6": null,
+   "aux_halfword_8": 86
+  },
+  {
+   "index": 20,
+   "raw_hex": "0202000075000b00ffffffff",
+   "byte0": 2,
+   "byte1": 2,
+   "byte2": 0,
+   "base_addr": 117,
+   "aux_halfword_6": 11,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 21,
+   "raw_hex": "0a080a0027011800ffffffff",
+   "byte0": 10,
+   "byte1": 8,
+   "byte2": 10,
+   "base_addr": 295,
+   "aux_halfword_6": 24,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 22,
+   "raw_hex": "0101000072000100ffffffff",
+   "byte0": 1,
+   "byte1": 1,
+   "byte2": 0,
+   "base_addr": 114,
+   "aux_halfword_6": 1,
+   "aux_halfword_8": null
+  },
+  {
+   "index": 23,
+   "raw_hex": "00000100d01f0d0002000000",
+   "byte0": 0,
+   "byte1": 0,
+   "byte2": 1,
+   "base_addr": 8144,
+   "aux_halfword_6": 13,
+   "aux_halfword_8": 2
+  }
+ ],
+ "ioctl_commands": {
+  "0x900": "generic/unknown (arg-dependent, checks table at 0x1507b0)",
+  "0x901": "handler 0x12b0cc (stores arg at ctx+8)",
+  "0x902": "handler 0x12b0cc",
+  "0x903": "handler 0x12b074",
+  "0x904": "handler 0x12ae60",
+  "0x905": "load EQ profile (0x12abbc): applies features idx 8,11,13,20,22",
+  "0x906": "table idx 12 via 0x12a15c",
+  "0x907": "biquad bank, table idx 4, via 0x12c0e8",
+  "0x90c": "table idx 2 via 0x1290f0",
+  "0x910": "0x12ad04",
+  "0x911": "0x12ade0",
+  "0x913": "table idx 14 via 0x129908",
+  "0x914": "table idx 14 via 0x1298b8",
+  "0x915": "0x12adb8",
+  "0x917": "0x12ad90",
+  "0x918": "0x12ad90",
+  "0x91a": "0x12ace8",
+  "0x91c": "table idx 16 via 0x126378 (writes 1.0/0.0 constants)",
+  "0x925": "table idx 19 via 0x12bf48",
+  "0x928": "table idx 20 via 0x12a4a8 (reads DSP 0xE21F)",
+  "0x929": "table idx 20 via 0x12a320",
+  "0x92a": "table idx 21 via 0x126c44",
+  "0x92b": "table idx 21 via 0x126bec",
+  "0x92c": "table idx 22 via 0x12c574",
+  "0x92d": "table idx 22 via 0x12c418"
+ },
+ "write_primitives": {
+  "param_write_direct": {
+   "fn": "0x12b738 / 0x12b7c0",
+   "wire": "00 | addr_hi addr_lo | 4-byte word (28-bit valid, big-endian)",
+   "note": "0x12b7c0 takes a 'host' value and halves it (word = host>>1); 0x12b738 takes the raw word"
+  },
+  "control_register_write": {
+   "fn": "0x12b6cc",
+   "wire": "00 | addr_hi addr_lo | val_hi val_lo (16-bit value)"
+  },
+  "param_read": {
+   "fn": "0x12bbc8 (1 word) / 0x12bb44 (n words<=60) / 0x12bc5c (16-bit)",
+   "wire": "01 | addr_hi addr_lo then clock out data"
+  },
+  "safeload_write": {
+   "fn": "0x12bcf0",
+   "note": "used for biquads; 1..60 words"
+  },
+  "max_single_transfer_bytes": 243,
+  "no_program_download_path": "All host->DSP transmit lengths are constants 3..11 or 3+4n (n<=60). No bulk write exists, so the host never loads a DSP program."
+ },
+ "matrix_tag_0x10": {
+  "loader": "0x126ce8 (table idx 8, base 455)",
+  "shape": "up to 10 rows x 8 cols of big-endian 16-bit values",
+  "scaling": "DSP word = value << 12, i.e. 0x0800 == 1.0",
+  "write": "direct single-word writes (not safe-load)"
+ },
+ "control_register_init_table": {
+  "handler": "cmd 0x902 -> 0x12b0cc",
+  "note": "74 control registers at 0xE000-0xE2xx written with values supplied in a caller blob; the service code path analyzed NEVER issues cmd 0x902, so this table is not used at runtime in this firmware.",
+  "address_table_vaddr": "0x142418",
+  "groups": [
+   [
+    57984,
+    57920,
+    57888
+   ],
+   [
+    57344,
+    57345,
+    57346,
+    57347,
+    57348,
+    57349,
+    57350,
+    57351,
+    57352
+   ],
+   [
+    57408,
+    57409,
+    57410,
+    57411,
+    57412,
+    57413,
+    57414,
+    57415,
+    57416,
+    57488,
+    57489,
+    57490,
+    57491,
+    57492,
+    57493,
+    57494,
+    57495,
+    57496,
+    57497,
+    57498,
+    57499
+   ],
+   [
+    57472,
+    57473,
+    57474,
+    57475,
+    57476,
+    57477,
+    57478,
+    57479,
+    57480,
+    57481,
+    57482,
+    57483,
+    57484,
+    57485,
+    57486,
+    57487,
+    57603,
+    57667,
+    57601,
+    57665
+   ],
+   [
+    57921,
+    57544,
+    57543,
+    57537
+   ],
+   [
+    57860,
+    57861,
+    57862,
+    57863,
+    57864,
+    57865,
+    57866,
+    57867,
+    57868,
+    57869,
+    57870,
+    57871
+   ],
+   [
+    57930,
+    57928,
+    57927,
+    57929,
+    57932
+   ]
+  ]
+ },
+ "gpio_verified_from_code": {
+  "register_offsets": "OMAP GPIO: 0x34 OE, 0x48 RISINGDETECT, 0x4c FALLINGDETECT, 0x90 CLEARDATAOUT, 0x94 SETDATAOUT (confirmed against QEMU OMAP GPIO model)",
+  "GPIO102_gpio4_bit6": "input; code CLEARS rising-detect and SETS falling-detect -> FALLING edge (contradicts earlier kit 'rising')",
+  "dsp_init_0x126a08": "GPIO170 (gpio6 bit10) driven LOW and set as output; GPIO4 CLEARDATAOUT 0x2e008 (bits 3,13,15,16,17 = GPIO99,109,111,112,113 low), then SETDATAOUT 0x20008 (GPIO99 and GPIO113 high); delay(0x2af8=11000, units not confirmed, likely microseconds)",
+  "pwramp_class": "CAudioCtrlSvcPwrAmp (fn 0x1242c4) RELEASES GPIO170 (SETDATAOUT 0x400), delays 0x1f4, then sets GPIO4 bits 13-15 (0xE000) high, and talks to device id 0x6f over /dev/i2c2. GPIO170 is therefore at least shared with the power amplifier; it is NOT proven to be a DSP-only reset.",
+  "gpio170_assert_in_pwramp": "fn 0x123808 clears bit10 and delays 0xb71b0 (750000)"
+ },
+ "profile_tags_verified": {
+  "0x35_map": "every entry low-7-bits is a valid biquad index in all 132 files; bit7 set on 2072 of 5472 entries (meaning unknown)",
+  "0x0e": "12 bytes; per-channel counts (9 distinct vectors across 132 files). Hypothesis 'sum == len(0x35)' FAILS for 116/132 files; role unresolved",
+  "idx11_loader": "0x1299d4 consumes tags 0x0f,0x0e,0x36,0x35 (table idx 11, base 535)"
+ },
+ "still_unknown": [
+  "how DSP program is provided (no host download; presumably external memory/self-boot: needs physical board inspection)",
+  "meaning of DSP status read at 0xE21F (cmd 0x928)",
+  "tag 0x35 bit 7, tags 0x0f/0x0e/0x61 semantics",
+  "power-amp I2C device id 0x6f register map",
+  "which pin(s) truly reset the DSP vs amp (GPIO170 shared)"
+ ]
+}

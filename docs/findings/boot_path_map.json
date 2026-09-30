@@ -1,0 +1,215 @@
+{
+ "source": "swdl_boombox_6.5GT.iso, NA 1.22.0.3 (sha256 c9dca56b...); IPL sha256 d39baeae...; COMPLETE.BIN sha256 930aea06...",
+ "confidence_note": "Everything below was read directly from disassembly of IPL_HBAS.BIN and the stock update tools/scripts, and cross-checked against the actual firmware bytes. Nothing has been run on hardware.",
+ "board_id_string": "QNX Neutrino Initial Program Loader(II) for HBAS DRA523/DRA526 HDISYS Board",
+ "nand_layout": {
+  "source": "/etc/system/config/nand_partition.txt (also called partition.txt), identical copies confirmed in ISO and in both boot IFS images",
+  "block_unit": "NAND erase blocks (size not stated in this file; must be read from the NAND ID table in update_nand_teb / fs-etfs)",
+  "partitions": {
+   "IPL0": "block 0",
+   "IPL1": "block 1",
+   "IPL2": "block 2",
+   "IPL3": "block 3",
+   "IFS0": "blocks 4-339 (336 blocks)",
+   "IFS1": "blocks 340-675",
+   "IFS2": "blocks 676-1011",
+   "ETFS": "blocks 1028-2047 (persistent data filesystem: /mnt/persistence)"
+  },
+  "note": "4 identical IPL copies + 3 IFS slots (A/B/C style) + ETFS for user/calibration data. Gap 1012-1027 unaccounted for in this file."
+ },
+ "ipl_boot_sequence": {
+  "step1_read_eeprom_flags": "IPL reads 3 partition-valid flags (one per IFS slot) from I2C EEPROM at /dev/i2c2 addr 0x50, offset 0 (partitionValid, 8 bytes) via routine at IPL 0x40201234. If EEPROM read fails, ALL partitions are treated as valid (fail-open).",
+  "step2_pick_last_used_slot": "Reads a 1-byte 'last used slot' bitmask from EEPROM offset 0xFD0 (matches eeprom cfg field 'currentIFS'); IPL routine 0x40200fd4 decodes it to a slot index 0-2, else -1.",
+  "step3_scan_loop": "Starting at (last_used+1) mod 3, tries each of the 3 IFS slots in order; skips any slot whose valid flag is clear. If ALL three are invalid, IPL forces all three valid and retries once.",
+  "step4_per_slot": {
+   "a_locate_block": "start_block = 4 + slot_index * blocks_per_ifs (336), i.e. matches nand_partition.txt IFS0/IFS1/IFS2 exactly",
+   "b_scan_for_signature": "image_scan() (IPL 0x40203c08) walks 4-byte-aligned offsets looking for the QNX startup-header magic 0xFF7EEB (little-endian bytes EB 7E FF 00) within each NAND page, honoring the header's own image_size field to skip to the next candidate",
+   "c_page_ecc_check": "Each page is read via NAND controller registers at GPMC base 0x6E000000-class offsets (IPL only, since GPMC config lives at fixed IPL addresses, not in the AM35xx CM/PRM map used elsewhere) with 4-bit BCH-style ECC decode (routine 0x40202998); pages failing ECC are logged as 'Uncorrectable ECC Error' and the whole partition is marked bad via /dev/i2c2 EEPROM write",
+   "d_sequence_number_check": "each 2KB page's spare/OOB area holds a 4-byte little-endian sequence number at page-relative offset +0x800+4; IPL requires consecutive pages to have the SAME sequence number within one image; a mismatch aborts the partition as 'Incorrect sequence number'",
+   "e_checksum": "whole-image integrity check is a flat 32-bit word sum over two regions: [0 .. startup_size) and [startup_size .. stored_size), each independently required to sum to 0 mod 2^32 (verified against the stock COMPLETE.BIN: both sums are exactly 0). Routine: IPL 0x40203b24, calling per-512-byte-chunk adder at 0x40203ae8 (flat 32-bit accumulate, no polynomial/CRC)."
+  },
+  "step5_jump": "on first slot that passes all checks, IPL prints 'Jumping to startup' and branches to the startup vaddr taken from the QNX image header (0x801004A0 in the stock image); it does NOT re-verify anything after that -- control permanently leaves the IPL.",
+  "step6_all_failed": "if every slot fails, IPL loops forever re-trying all partitions (no fallback to a raw recovery mode was found in this binary)."
+ },
+ "qnx_startup_header_stock_values": {
+  "signature": "0x00FF7EEB",
+  "header_size": "0x100",
+  "machine": "40 (EM_ARM)",
+  "flags1": "0x0d = VIRTUAL | COMPRESS_UCL | COMPRESS_LZO (bitfield; first boot image is UCL/NRV2B, two secondary hbcifs images inside it are LZO1X -- see prior DSP handoff notes)",
+  "startup_vaddr": "0x801004a0",
+  "image_paddr": "0x80100000",
+  "ram_paddr": "0x80100000",
+  "ram_size_field": "0x3512ac (this is the startup relocation window, NOT total physical DRAM -- see sdrc note below)",
+  "startup_size": "0x15108",
+  "stored_size": "0x1bf400 (== first hbcifs slot boundary found previously)"
+ },
+ "ddr_controller_ipl_config": {
+  "status": "Traced instruction-by-instruction; raw register writes are 100% verified against the actual IPL bytes. Register-NAME mapping is UNCONFIRMED -- see caveat below.",
+  "important_caveat": "The offsets written (0x04,0x08,0x10,0x14,0x18,0x1c,0x20,0x24,0x28,0x2c,0x38,0x3c,0x60) do NOT match the mainline/published OMAP3530 SDRC register map (which places CS0/CS1 register pairs 0x30 apart, e.g. MCFG_0=0x80 vs MCFG_1=0xB0). This board's memory controller at base 0x6D000000 registers its CS0/CS1 pairs only 4 bytes apart instead (0x18/0x1c, 0x20/0x24, 0x28/0x2c, 0x38/0x3c all get the SAME value written to X and X+4). This is a materially different register layout than the published TI OMAP3530 TRM. Two explanations are possible: (1) this DRA523/DRA526 'HBAS' part uses a different/older memory-controller block than mainline OMAP3530, or (2) 0x6D000000 is not the SDRC in this design. Do NOT reuse a mainline OMAP3530 SDRC driver's register offsets on this hardware without verifying against the actual DRA52x manual first -- doing so risks writing to the wrong register.",
+  "verified_raw_sequence": [
+   {
+    "addr": "0x6d0000ec",
+    "value": "0x0"
+   },
+   {
+    "addr": "0x6d0000e4",
+    "value": "0x8006"
+   },
+   {
+    "addr": "0x6d0000e8",
+    "value": "0x8006"
+   },
+   {
+    "addr": "0x6d000060",
+    "action": "read-modify-write: OR in bit 0x400, write back, then POLL the same register in a loop until bit 0x400 reads back set (classic 'trigger then wait for ready' pattern, e.g. DLL lock or reset-done)"
+   },
+   {
+    "addr": "0x6d000004",
+    "action": "POLL until bit 2 (0x4) is set -- a second, separate ready/status wait"
+   },
+   {
+    "addr": "0x6d000060",
+    "action": "read, OR in bit 0x1, write back (an 'enable' step following the two wait loops above)"
+   },
+   {
+    "addr": "0x6d000018",
+    "value": "0x6803292"
+   },
+   {
+    "addr": "0x6d00001c",
+    "value": "0x6803292 (SAME value as 0x18 -- CS0/CS1 pair, timing or mode register)"
+   },
+   {
+    "addr": "0x6d000020",
+    "value": "0x201c3200 (composed from 2|8|0x3200|0x1c0000, then a separate write ORs in 0x20000000 more -- see raw disasm)"
+   },
+   {
+    "addr": "0x6d000024",
+    "value": "same composite as 0x20 -- CS0/CS1 pair"
+   },
+   {
+    "addr": "0x6d000028",
+    "value": "0x257 (previously reported; CS0/CS1 pair with 0x2c)"
+   },
+   {
+    "addr": "0x6d00002c",
+    "value": "0x257"
+   },
+   {
+    "addr": "0x6d000038",
+    "value": "0x80000000"
+   },
+   {
+    "addr": "0x6d00003c",
+    "value": "0x80000000 (CS0/CS1 pair with 0x38)"
+   },
+   {
+    "addr": "0x6d000010",
+    "value": "0x50f"
+   },
+   {
+    "addr": "0x6d000014",
+    "value": "0x50f (CS0/CS1 pair with 0x10)"
+   },
+   {
+    "addr": "0x6d000008",
+    "action": "final composite write; value depends on a runtime memory-package check (see below): 0x408016b2 if CONTROL_STATUS bit 0x6000 is set, else 0x40801632"
+   }
+  ],
+  "package_type_autodetect": {
+   "register_read": "0x4800244c (this IS a real, verified OMAP3 CONTROL address -- CONTROL_STATUS register region)",
+   "logic": "reads CONTROL_STATUS, tests bits [14:13] (mask 0x6000); if either bit is set, uses composite value 0x280 in the final DDR register, else uses 0x200",
+   "interpretation": "This matches OMAP3's real documented POP/package-type detection strapping (used on real hardware to distinguish single-die vs. stacked/POP memory packages) -- this part of the trace DOES match known-good OMAP3 behavior, which is independent corroboration that the IPL is doing genuine memory-controller bring-up here, even though the exact target register block's offset layout is nonstandard as noted above."
+  },
+  "recommendation": "Before writing any custom DDR init code for this board, get the real DRA523/DRA526 (or whatever this SoC's exact datasheet is) TRM, or -- far lower risk -- do NOT reinitialize DDR at all: chain-load after the stock IPL has already done this work, since by the time IFS/startup runs, DRAM is already configured and stable. This is the same 'ride the stock IPL' strategy already recommended in the boot-sequence section above."
+ },
+ "flash_and_recovery_tools": {
+  "nand_writer": {
+   "binary": "/armle/bin/update_nand_teb (present twice in ISO: ARMLE/BIN and BIN)",
+   "purpose": "Utility to Update IPL and IFS on the boot NAND for 'TEB' (Toyota Extension Box) board -- confirms this hardware is a shared platform, not Harley-specific silicon",
+   "usage": [
+    "update_nand_teb -i -f <iplimage>   # update IPL",
+    "update_nand_teb -p <0-3> -f <ifsimage>   # update one IFS slot",
+    "-c <partition file>  (default /etc/system/config/nand_partition.txt)",
+    "-q  quiet/scriptable output"
+   ],
+   "behavior": "Validates the image's HBCIFS/startup signature before writing, erases blocks, writes pages, marks bad blocks, verifies via a hbcifs sub-section signature scan (same 0xFF7EEB check as the IPL, plus per-sub-image 'hbcifs' tag search for the secondary UCL images)"
+  },
+  "installer_driver": "usr/share/scripts/INSTALL.SH runs `lua -s softwareupdate` from usr/share/scripts/update, which is compiled Lua bytecode (SOFTWARE., INSTALLE/*). String constants recovered from the bytecode show it: mounts the update ISO, checks /etc/ECC2_MARKER, optionally reformats ETFS, calls update_nand_teb via install/IFS.lua's 'update_nand_teb -i -f ...' / 'update_nand_teb -f ...' patterns, and finally calls /boot/bin/set-partition and 'set-ifs-size'.",
+  "code_signing": {
+   "public_key_present": "usr/share/scripts/update/swdl.pub -- a 512-bit RSA public key (PEM, 'MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAMMP0TJzgKrIn1wbvtupEWJup5GwibW3BSMvSnO+HNmHDmBBWjQfs3U7fkhSAtOSYAYShe1zLmKM2e1l2sxMKvMCAwEAAQ==')",
+   "key_ring_file": "authenticationServiceKeyFile.json holds 100 numbered keyRing entries (64-char values, presumably hex-encoded 256-bit keys) plus a prodIdPath -- used by authenticationCheck.lua for the SWDL/nav-update flow, separate from the IPL's own boot-time checks",
+   "conclusion": "The IPL itself does NOT check any signature -- only the flat checksum, sequence number and ECC described above. RSA/keyring checks are enforced only by the userspace SWDL installer (authenticationCheck.lua), which is bypassed entirely if you write NAND directly with update_nand_teb or an external programmer.",
+   "caveat": "Not fully traced: whether update_nand_teb itself calls into any signature check beyond the structural 'hbcifs'/startup-signature scan. Its strings show no RSA/hash-related text, which supports 'no cryptographic check', but this is an absence-of-evidence inference, not a proven negative."
+  }
+ },
+ "eeprom_map_relevant_to_boot": {
+  "bus": "I2C2, /dev/i2c2, 7-bit address 0x50 (both IPL and userspace agree)",
+  "partitionValid": "offset 0x0000, 8 bytes",
+  "bootmode": "offset 0x0008, 2 bytes, checksummed",
+  "sdramTest": "offset 0x000C, 1 byte",
+  "ifsSizeInMB": "offset 0x000D, 2 bytes",
+  "cpuMode": "offset 0x000F, 1 byte",
+  "currentIFS_last_used_slot": "offset 0xFD0, 1 byte (userspace name 'currentIFS'; consumed by IPL as the 'last used slot' bitmask)",
+  "valid_flag_magic_bytes": "IPL compares each 4-byte partition-valid slot against constant 33 66 99 CC (hex) to decide 'valid'"
+ },
+ "debug_console": {
+  "device": "devc-seromap on UART3, MMIO base 0x49020000",
+  "args": "-e -F -b115200 -c48000000/16 0x49020000^2,74 (74 = IRQ number)",
+  "device_node": "/dev/ser1",
+  "confirmed_in": "both primary startup-script and secondary swdl-premium.sh -- same UART used during normal boot and during the SWDL/recovery boot mode"
+ },
+ "boot_mode_detection": {
+  "mechanism": "boot-mode utility reads state over /dev/i2c0 (front/IOC controller channel, not i2c2); swdl-premium.sh only proceeds into software-download mode if boot-mode returns 66 ('B'), 70 ('F') or 85 ('U') -- ASCII codes for boot-mode letters",
+  "note": "this confirms boot mode selection is arbitrated by the 78K0R front/IOC controller over I2C, not a GPIO strap read directly by the OMAP; matches the front/IOC-controller SPI findings from the DSP session (separate bus, I2C not SPI, for this specific function)"
+ },
+ "linux_port_implications": [
+  "A Linux u-boot/kernel image intended to boot on this hardware must either (a) replace the stock IPL with a U-Boot SPL that speaks this same GPMC NAND geometry + ECC, or (b) be packaged AS a QNX-format image (0xFF7EEB header, whole-word-sum-zero checksum, correct startup_vaddr) so the STOCK IPL loads it unmodified -- option (b) is much lower risk and requires no NAND-layout changes.",
+  "Whole-word-sum-to-zero is trivial to satisfy: pad the image with one 32-bit filler word chosen so the total sums to zero, exactly like the EQ-file checksum found earlier.",
+  "The sequence-number-per-page requirement means a hand-crafted image must still go through update_nand_teb (or reproduce its page-tagging) rather than being written as a raw byte stream.",
+  "No cryptographic signature blocks a custom IPL/IFS from booting; the RSA key material only gates the userspace SWDL updater, not the boot chain itself. This lowers technical risk for a Linux port, but you should treat this as a preliminary reading of the disassembly, not a guarantee -- update_nand_teb's own validation path was not fully traced.",
+  "Debug UART3 (115200-8N1, /dev/ser1 under QNX) is available from earliest boot and is the safe way to watch a custom image's boot attempt without touching NAND.",
+  "DDR controller (SDRC) timing values are captured but not yet decoded into an actual DRAM size/CAS-latency/etc. -- needed before writing a Linux SDRAM/DT memory node with confidence."
+ ],
+ "open_items": [
+  "Exact NAND page/block geometry (page size, block size, ECC scheme parameters) -- present in update_nand_teb and fs-etfs strings by name but not yet decoded to numbers",
+  "Full decode of SDRC_MCFG/ACTIM register values into DRAM size and timing",
+  "Whether update_nand_teb performs any check beyond structural signature scanning",
+  "GPMC NAND controller init sequence (timing registers) used by the IPL before the first page read -- not yet traced",
+  "Complete Lua bytecode disassembly of INSTALLE/IFS. and SOFTWARE. sources (only string constants extracted so far)"
+ ],
+ "nand_chip_geometry": {
+  "source": "IPL nand_init() at 0x402027d8, fully disassembled and decoded",
+  "accepted_id_byte2_values": [
+   "0xAA",
+   "0xBA",
+   "0xCA",
+   "0xDA"
+  ],
+  "note_on_ids": "5-byte NAND ID is read (CMD 0x90, addr 0). Only ID byte[2] is checked, and any of the four listed values is accepted -- this matches the 3rd ID byte used across a Micron SLC NAND family that all share the same page/block geometry, so the IPL doesn't need to distinguish exact density.",
+  "page_size_bytes": 2048,
+  "spare_size_bytes": 64,
+  "block_size_bytes": 131072,
+  "pages_per_block": 64,
+  "derived_min_capacity_MB": 256,
+  "gpmc_ecc_registers_written_by_ipl": {
+   "GPMC_ECC_CONTROL (base+0x1f8)": "0x101 -- selects ECC engine result-set 1 and clears/enables it",
+   "GPMC_ECC_SIZE_CONFIG (base+0x1fc)": "0x3fcff000 -- BCH 4-bit ECC size config (matches known-good OMAP3 4-bit ECC reset/config value from independent public GPMC references, cross-checked against this exact constant)",
+   "GPMC_PREFETCH_CONFIG1 (base+0x1e0)": "0 (prefetch engine left disabled -- IPL reads NAND with programmed I/O, not DMA/prefetch)",
+   "GPMC_PREFETCH_CONFIG2 (base+0x1e4)": "0",
+   "GPMC_PREFETCH_CONTROL (base+0x1ec)": "0"
+  },
+  "gpmc_base_address": "0x6E000000 (stored in a small IPL bookkeeping struct at data address 0x8000801c, not referenced as a raw literal elsewhere -- all later NAND page reads go through that struct pointer)",
+  "confidence": "High -- register offsets cross-checked against multiple independent public OMAP/GPMC references (QEMU model + Linux gpmc.c), and the ECC_SIZE_CONFIG value (0x3fcff000) matches a documented real-hardware constant exactly, which is strong corroboration this decode is correct."
+ },
+ "soc_identification": {
+  "conclusion": "DRA523/DRA526 is NOT a publicly documented TI part. TI's public catalog only lists automotive infotainment SoCs from DRA71x/72x/74x/75x/78x (\"Jacinto 6\" and later, Cortex-A15/A9-class, 2013+) upward. Nothing named DRA5xx or DRA52x appears anywhere in TI's public product pages or press material.",
+  "reasoning": [
+   "The firmware's own driver name is literally 'j3-isys_dsp' -- Jacinto 3 -- confirming this SoC belongs to TI's automotive Jacinto line, generation 3 (predates the publicly-documented Jacinto 5/6 = DRA44x/DRA74x families).",
+   "TI's automotive OMAP/Jacinto parts are historically NDA/design-in only ('not available through distributors', per TI's own Jacinto 6 press material) -- earlier generations like this DRA52x were never given public datasheets or TRMs at all.",
+   "This directly explains the SDRC/memory-controller register-layout mismatch found in the DDR trace: DRA52x is a distinct silicon design (OMAP3-family core, but with TI's automotive-specific peripheral/memory-controller integration) that never had a public register reference to compare against. The 'mismatch' isn't a mistake in the trace -- it's simply undocumented silicon."
+  ],
+  "practical_implication": "No amount of additional public-source searching will produce a real TRM for this exact register block. The only ways to fully resolve the DDR controller's exact semantics from here are: (1) a real TI DRA52x NDA document (unlikely to be obtainable), or (2) live hardware tracing (JTAG/logic analyzer on the SDRC pins during boot) once bench access is available. Until then, 'chain-load after the stock IPL has configured DRAM' remains the only low-risk path for any custom OS.",
+  "confidence": "High that DRA52x has no public documentation; the specific reasoning chain (j3-isys_dsp driver name + TI's own NDA-only automotive Jacinto history) is solid, though I can't rule out a TRM existing in some private/leaked corner of the internet I haven't found."
+ }
+}
