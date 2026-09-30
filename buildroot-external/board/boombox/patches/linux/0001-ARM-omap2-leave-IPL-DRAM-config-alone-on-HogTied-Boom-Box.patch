@@ -1,0 +1,73 @@
+From: David Martin <dmarti47@emich.edu>
+Subject: [PATCH] ARM: omap2: leave IPL DRAM config alone on HogTied Boom! Box
+
+The Boom! Box 6.5GT memory controller at 0x6D000000 is undocumented
+silicon whose register layout matches AM35xx EMIF4, not the OMAP3 SDRC.
+The stock QNX IPL configures DRAM before handing off, and HogTiedOS's rule
+is to never reprogram it.
+
+Mainline touches it in two places for any "ti,omap3" machine:
+ - pdata_quirks_init() -> omap_sdrc_init() RMWs 0x6D000010 (EMIF4
+   SDRAM_REF_CTRL here, changing refresh 0x50F -> 0x517) and writes
+   0x6D000070.
+ - omap3_init_late() -> omap3_pm_init() installs omap3_pm_idle(), which
+   drives CORE/SDRAM low-power transitions designed around the SDRC.
+
+Skip both when the root is compatible with "hogtied,boombox-6.5gt".
+
+See docs/findings/CROSS_CHECKS.md in the HogTiedOS repo.
+
+Upstream-Status: Inappropriate [board-specific safety workaround]
+---
+diff --git a/arch/arm/mach-omap2/io.c b/arch/arm/mach-omap2/io.c
+--- a/arch/arm/mach-omap2/io.c
++++ b/arch/arm/mach-omap2/io.c
+@@ -18,6 +18,7 @@
+ #include <linux/init.h>
+ #include <linux/io.h>
+ #include <linux/clk.h>
++#include <linux/of.h>
+ 
+ #include <asm/tlb.h>
+ #include <asm/mach/map.h>
+@@ -498,6 +499,17 @@
+ 
+ void __init omap3_init_late(void)
+ {
++	/*
++	 * HogTied Boom! Box: omap3_pm_init() installs omap3_pm_idle(),
++	 * which drives CORE/SDRAM low-power transitions written for the
++	 * OMAP3 SDRC. The memory controller on this board is undocumented,
++	 * so skip OMAP3 PM entirely until it can be validated on hardware.
++	 */
++	if (of_machine_is_compatible("hogtied,boombox-6.5gt")) {
++		pr_info("HogTied: OMAP3 PM/idle disabled\n");
++		return;
++	}
++
+ 	omap_pm_soc_init = omap3_pm_init;
+ }
+ 
+diff --git a/arch/arm/mach-omap2/pdata-quirks.c b/arch/arm/mach-omap2/pdata-quirks.c
+--- a/arch/arm/mach-omap2/pdata-quirks.c
++++ b/arch/arm/mach-omap2/pdata-quirks.c
+@@ -560,8 +560,17 @@
+ 	 * We still need this for omap2420 and omap3 PM to work, others are
+ 	 * using drivers/misc/sram.c already.
+ 	 */
+-	if (of_machine_is_compatible("ti,omap2420") ||
+-	    of_machine_is_compatible("ti,omap3"))
++	/*
++	 * HogTied Boom! Box: the memory controller at 0x6D000000 is not an
++	 * OMAP3 SDRC (its register layout matches AM35xx EMIF4), and the
++	 * stock IPL has already configured it. omap2_sdrc_init() would RMW
++	 * 0x6D000010 (EMIF4 SDRAM_REF_CTRL on this part) and write
++	 * 0x6D000070, so leave the controller alone.
++	 */
++	if (of_machine_is_compatible("hogtied,boombox-6.5gt"))
++		pr_info("HogTied: skipping SDRC init, keeping IPL DRAM config\n");
++	else if (of_machine_is_compatible("ti,omap2420") ||
++		 of_machine_is_compatible("ti,omap3"))
+ 		omap_sdrc_init(NULL, NULL);
+ 
+ 	if (of_machine_is_compatible("ti,omap3"))
