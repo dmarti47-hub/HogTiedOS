@@ -171,3 +171,42 @@ board/clock/pin kit's extractor. Stock firmware lives in the gitignored
   power enable. Both agree that high means running.
 - **GPIO102 edge is contested:** rising (board/clock/pin handoff) vs falling
   (`dsp_layout_map.json`).
+
+## 8. Stock IPL behavior, verified by running it (tools/ipl-emu)
+
+The unmodified stock IPL (d39baeae...) was run from reset in Unicorn with
+simulated NAND, EEPROM and UART (see `tools/ipl-emu/README.md` for what is and
+isn't modeled). With the stock `completeifs-premium.bin` in slot 0 it prints
+its normal log and hands off to `0x801004A0`. Corrupted images are rejected,
+and a bad slot falls back to the next one. All of this is covered by
+`tools/ipl-emu/test_ipl_emu.py`.
+
+- **NAND is x16.** The IPL reads the spare area at column 0x400, i.e. 16-bit
+  word addressing (IDs 0xCA/0xBA). It reads pages through the GPMC prefetch
+  FIFO using cached sequential reads (0x30/0x31/0x3F).
+- **Correction: the spare-area "sequence number" is a page counter,** not one
+  number shared by the whole image. Spare +4 must be 0 on the image's first
+  page and increase by 1 per page (IPL 0x40203534). Bad blocks are skipped
+  without counting. `boot_path_map.json` step4 `d_sequence_number_check` is
+  wrong on this point.
+- **Correction: slot-valid flags are one byte per slot, mirrored.** The IPL
+  reads EEPROM bytes 0-7; slot i is valid iff byte[i] == {0x33,0x66,0x99,0xCC}[i]
+  and byte[i+4] == byte[i]. Rejecting a slot writes 0 to both bytes.
+- **The IPL writes the EEPROM on every boot:** `1 << slot` to 0xFD0
+  (currentIFS) before trying a slot, plus the invalidation above on failure.
+  EEPROM reads observed: 0xFD0, 0x0F, 0x0C, 0x0D, 0x00.
+- **Slot positions come out as 4 / 340 / 676**, i.e. 336 blocks per slot,
+  matching `nand_partition.txt`.
+- **Load behavior:** the IPL reads `stored_size` bytes (not the whole slot)
+  to **0x84000000**, verifies both sum-to-zero regions (one flipped bit in
+  either is rejected), copies `startup_size` bytes to `image_paddr`, and
+  patches the copied header: offset 0x28 (imagefs_paddr) = 0x84000000 +
+  startup_size, plus slot info from offset 0x41.
+- **Size limit:** stored_size - 1 must be <= 0x29FFFFF, so the image can be
+  up to 42 MiB (one slot).
+- **CPU state at the jump to startup_vaddr:** SVC mode, IRQ+FIQ masked, MMU
+  off, D-cache off, I-cache off. r0 = 0; r1/r2 hold leftover UART3 addresses,
+  not boot arguments. This is already what the Linux ARM boot protocol
+  requires, apart from r1/r2 (the shim sets them).
+- **Fail-open confirmed:** if every valid slot fails, the IPL prints "All
+  partitions failed, retrying..." and tries all slots, including invalid ones.
