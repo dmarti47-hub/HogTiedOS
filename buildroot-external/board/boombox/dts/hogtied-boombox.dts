@@ -9,10 +9,10 @@
  *   [inferred]   derived from findings, not stated directly by them
  *   TODO: unconfirmed  a real gap - do not "fix" by guessing
  *
- * Pin muxing: NO pad configuration data is available (the IPL pad table was
- * not extracted), so this file deliberately declares no pinctrl states and
- * relies on the pads the stock IPL left behind.
- * TODO: unconfirmed - extract IPL pad table before adding any pinctrl.
+ * Pin muxing: [confirmed] hogtied-boombox-pinmux.dtsi is generated from the
+ * stock IPL's own pad table (155 pads, tools/pinmux/gen_pinmux.py). It
+ * re-applies exactly the state the IPL leaves, since we boot straight from it.
+ * Pads are not yet split per device; that comes with each driver.
  */
 /dts-v1/;
 
@@ -23,6 +23,7 @@
  * If it's something else, switch to omap34xx.dtsi / omap36xx.dtsi.
  */
 #include "ti/omap/am3517.dtsi"
+#include "hogtied-boombox-pinmux.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 
 / {
@@ -202,9 +203,13 @@
 /*
  * Front controller / IOC (2x Renesas 78K0R) on McSPI3, 1 MHz, 2 CS
  * [confirmed: 0x480B8000 IRQ 91, dev-ipc -M3 -C0 -K1000000].
- * TODO: unconfirmed - IPC_REQ/IPC_ACK handshake lines "IRQ 136,137" are
- * QNX-remapped numbers (> 96 INTC lines), GPIO mapping unknown; SPI mode
- * word 0x608 not decoded; dev-ipc framing unknown. Devices disabled.
+ * [confirmed-ish] IPC_REQ/IPC_ACK handshake (dev-ipc -I136,137) = GPIO136 /
+ * GPIO137 (gpio5 bits 8/9): the IPL muxes exactly those two pads (0x2164,
+ * 0x2166, mmc2_dat4/5) to GPIO mode as inputs. Which one is REQ vs ACK is
+ * not established.
+ * TODO: unconfirmed - SPI mode word 0x608 (bring-up report decodes it as
+ * mode 1, 8-bit, MSB first; not verified here); dev-ipc framing (report
+ * gives A1/A2 read/write framing; not verified). Devices disabled.
  */
 &mcspi3 {
 	status = "okay";

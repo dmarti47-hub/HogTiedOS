@@ -31,7 +31,7 @@ BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="$(BR2_EXTERNAL_HOGTIED_PATH)/board/boomb
 BR2_LINUX_KERNEL_ZIMAGE=y
 BR2_LINUX_KERNEL_XZ=y
 BR2_LINUX_KERNEL_DTS_SUPPORT=y
-BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_HOGTIED_PATH)/board/boombox/dts/hogtied-boombox.dts"
+BR2_LINUX_KERNEL_CUSTOM_DTS_PATH="$(BR2_EXTERNAL_HOGTIED_PATH)/board/boombox/dts/hogtied-boombox.dts $(BR2_EXTERNAL_HOGTIED_PATH)/board/boombox/dts/hogtied-boombox-pinmux.dtsi"
 
 # Root filesystem: initramfs built into the kernel, so the whole OS is one
 # blob in one IFS slot and nothing needs to be written to ETFS.
