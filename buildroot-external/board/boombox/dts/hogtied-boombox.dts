@@ -37,20 +37,16 @@
 	};
 
 	/*
-	 * DRAM.
-	 * [inferred] base 0x80000000: IPL uses data at 0x8000801c and the
-	 * stock image loads at 0x80100000, so DRAM covers at least that range.
-	 *
-	 * TODO: unconfirmed - SIZE IS UNKNOWN. Not derivable from the captured
-	 * EMIF4 SDRAM_CONFIG (0x40801632 / 0x408016b2 depending on package
-	 * strap). The stock startup header's ram_size (0x3512ac) is only a
-	 * relocation window, NOT total DRAM. Size 0 is deliberate: the image
-	 * loader / packer must supply the real size (or this must be filled in
-	 * once it's known). Do not replace with a "typical" value.
+	 * DRAM. [confirmed] base 0x80000000 (the IPL copies itself there).
+	 * [confirmed] size: stock QNX startup (0x80100A18) reads EMIF4
+	 * SDRAM_CONFIG 0x6D000008 ROWSIZE[9:7] and registers 512 MiB if it is
+	 * 5, else 256 MiB. The IPL writes 5 or 4 depending on the package strap.
+	 * 256 MiB is correct on both variants. A loader may read (never write)
+	 * ROWSIZE and patch this to 0x20000000 when it reads 5.
 	 */
 	memory@80000000 {
 		device_type = "memory";
-		reg = <0x80000000 0x0>;
+		reg = <0x80000000 0x10000000>;
 	};
 
 	/*
@@ -62,6 +58,10 @@
 	 * TODO: unconfirmed - README says it is asserted only after an
 	 * ignition-on CAN message; whether Linux may raise it unconditionally
 	 * at boot is not established. Rail voltage unknown (none declared).
+	 * TODO: unconfirmed - CONFLICT: the board/clock/pin handoff calls it
+	 * the DSP's active-low reset (IPL pad 0x480021C6 = 0x0004, output,
+	 * mode 4). Both readings agree that HIGH = running, but if it's a DSP
+	 * reset, display code shouldn't own it. Resolve before any audio work.
 	 */
 	board_pwr_en: regulator-board-pwr-en {
 		compatible = "regulator-fixed";
@@ -71,20 +71,22 @@
 	};
 
 	/*
-	 * [confirmed] 400x234 RGB565 panel, timing from the single active
-	 * entry in stock /etc/system/config/omap3530.conf:
-	 *   hsw=2 hfp=34 hbp=84 vsw=1 vfp=32 vbp=17 ivs=1 ihs=1 ipc=1 ieo=0x4
-	 *   pcd=0xb ppl=400 lpp=234 lcdfmt=0x1 (16-bit)
-	 * Totals 520 x 284 at 96 MHz / 11 = 8.727 MHz (about 59.1 Hz).
+	 * [confirmed] 400x240 RGB565 panel. The stock image is the PREMIUM
+	 * build: boot IFS display.conf -> premium/omap3530.conf, whose only
+	 * active line is
+	 *   hsw=28 hfp=40 hbp=60 vsw=3 vfp=13 vbp=29 ivs=1 ihs=1 ipc=1 ieo=0x4
+	 *   pcd=0x8 ppl=400 lpp=240 lcdfmt=0x1 dither=2
+	 * (The 400x234 entry cited in display_graphics_map.json is from
+	 * standard/omap3530.conf, which this image doesn't use.)
+	 * Totals 528 x 285.
 	 *
-	 * TODO: unconfirmed - whether hsw/hfp/hbp/vsw/vfp/vbp are real
-	 * cycle counts or DISPC register encodings (OMAP DISPC stores
-	 * several as value-1). The QNX DISPC timing writes were never
-	 * found (display_graphics_map.json: dispc_register_sequence_TRACED).
-	 * Values below take them as real counts.
-	 * TODO: unconfirmed - ieo=0x4 (data-enable polarity) meaning unknown;
-	 * de-active left unspecified.
-	 * TODO: unconfirmed - panel part number / compatible unknown.
+	 * TODO: unconfirmed - pixel clock. display.conf declares refresh=60,
+	 * giving 60 * 528 * 285 = 9.029 MHz (used below). pcd=8 disagrees
+	 * unless the DSS functional clock is ~72 MHz: at 96 MHz it would give
+	 * 12 MHz / ~80 Hz. The DSS clock source hasn't been traced.
+	 * TODO: unconfirmed - whether hsw/hfp/... are real counts or DISPC
+	 * register encodings (value-1); taken as real counts.
+	 * TODO: unconfirmed - ieo=0x4 (data-enable polarity), dither=2.
 	 */
 	lcd0: display {
 		compatible = "panel-dpi";
@@ -92,15 +94,15 @@
 		power-supply = <&board_pwr_en>;
 
 		panel-timing {
-			clock-frequency = <8727273>;
+			clock-frequency = <9028800>;
 			hactive = <400>;
-			vactive = <234>;
-			hfront-porch = <34>;
-			hback-porch = <84>;
-			hsync-len = <2>;
-			vfront-porch = <32>;
-			vback-porch = <17>;
-			vsync-len = <1>;
+			vactive = <240>;
+			hfront-porch = <40>;
+			hback-porch = <60>;
+			hsync-len = <28>;
+			vfront-porch = <13>;
+			vback-porch = <29>;
+			vsync-len = <3>;
 			hsync-active = <0>;	/* ihs=1: active low */
 			vsync-active = <0>;	/* ivs=1: active low */
 			pixelclk-active = <0>;	/* ipc=1: sampled on rising edge */
@@ -155,19 +157,22 @@
  * [confirmed] I2C EEPROM at 7-bit 0x50 holding IPL boot state:
  * partitionValid @0x0000, bootmode @0x0008, ifsSizeInMB @0x000D,
  * currentIFS @0x0FD0, touchCal @0x1874.
- * TODO: unconfirmed - which OMAP I2C controller QNX's /dev/i2c2 is
- * (i2c2 or i2c3 depending on QNX numbering). Placed on &i2c2 but DISABLED.
- * [inferred] >= 8 KiB (touchCal ends at 0x1890) -> 24c64-class; exact part
- * TODO: unconfirmed.
+ * [confirmed] bus: QNX /dev/i2c2 is `i2c-omap35xx -p0x48060000 -i61 -u2`
+ * in the stock startup script, i.e. OMAP I2C3; libeeprom uses
+ * i2c_port=2, i2c_address=0x50. QNX also runs I2C2 (0x48072000, IRQ 57).
+ * [inferred] >= 8 KiB (touchCal ends at 0x1890). Declared as 24c64:
+ * larger 2-byte-address parts read identically within the first 8 KiB.
+ * TODO: unconfirmed - exact part.
  * read-only: this EEPROM decides which IFS slot the IPL boots. Nothing in
  * Linux may write it without an explicit, reviewed change.
  */
-&i2c2 {
+&i2c3 {
+	clock-frequency = <400000>;	/* [confirmed] -c400 */
+
 	boot_eeprom: eeprom@50 {
 		compatible = "atmel,24c64";
 		reg = <0x50>;
 		read-only;
-		status = "disabled";
 	};
 
 	/* TODO: unconfirmed - audio power amp "device id 0x6f" on the same

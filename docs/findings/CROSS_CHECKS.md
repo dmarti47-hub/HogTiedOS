@@ -42,10 +42,9 @@ Corrections to `boot_path_map.json`:
   until it *clears*. Worth re-checking the disassembly branch sense. It doesn't
   affect us, since we never run this code.
 
-**What this does NOT resolve: DRAM size.** On EMIF4 with DDR2 (SDRAM_TYPE=2),
-ROWSIZE appears not to define capacity. U-Boot's AM3517 EVM uses ROWSIZE=0 and
-hard-codes 256 MiB. So the package-strap-dependent ROWSIZE difference can't be
-turned into a size. **DRAM size stays unknown.**
+**DRAM size (corrected, see sec. 7).** An earlier version of this file said
+ROWSIZE couldn't be turned into a size. That was wrong: stock QNX startup uses
+exactly this field. ROWSIZE 5 means 512 MiB, anything else 256 MiB.
 
 **The "never write DDR/SDRC init" rule is unchanged.** This only tells us what
 the silicon we're avoiding probably is.
@@ -121,8 +120,7 @@ McSPI2 (the DSP bus) has no base address in the findings. Mainline puts it at
 - **Boot-mode channel:** `ioc_link_map.json` says ioc-boot-mode reads "ch8", but
   dev-ipc runs with `-c8`, which gives ch0–ch7. `boot_path_map.json` says boot
   mode comes over `/dev/i2c0`. These can't all be right as written. Unresolved.
-- **QNX I2C numbering:** which OMAP I2C instance `/dev/i2c2` (EEPROM 0x50) is
-  hasn't been established. The DTS treats this as unknown.
+- **QNX I2C numbering:** resolved in sec. 7. `/dev/i2c2` is OMAP I2C3.
 - **EEPROM size lower bound:** the `touchCal` field at 0x1874 + 28 bytes means
   the part is at least 8 KiB (≥ 24C64-class). Exact part unknown.
 
@@ -134,3 +132,42 @@ McSPI2 (the DSP bus) has no base address in the findings. Mainline puts it at
 - Whether the IPL caps the read length by the EEPROM `ifsSizeInMB` field /
   `set-ifs-size`. This bounds our image size.
 - The byte offset of the startup header within a slot (the IPL scans for it).
+
+## 7. Verified directly against the ISO and extracted IFS (2026-09-30)
+
+Sources: `swdl_boombox_6.5GT.iso` (sha256 c9dca56b..., matches the handoff),
+`completeifs-premium.bin` (930aea06...), `ipl-hbas-dra526-hdisys-nand.bin`
+(d39baeae...). All three ImageFS regions were extracted with the
+board/clock/pin kit's extractor. Stock firmware lives in the gitignored
+`firmware/` directory and is never committed.
+
+- **DRAM size: 256 or 512 MiB, selected by EMIF4 ROWSIZE.** Stock startup at
+  `0x80100A18`: `ldr [0x6D000008]; ubfx #7,#3; cmp #5` → 512 MiB, else
+  256 MiB, both at 0x80000000. The IPL writes ROWSIZE 5 (`0x408016B2`) when
+  CONTROL_STATUS[14:13] is nonzero, else 4 (`0x40801632`). The DTS uses
+  256 MiB, which is correct on both. Detecting 512 MiB only needs a register
+  *read*.
+- **Display is 400x240, not 400x234.** This ISO carries only the premium
+  image. Boot-IFS `display.conf` → `premium/omap3530.conf`, active line
+  `hsw=28,hfp=40,hbp=60,vsw=3,vfp=13,vbp=29,ivs=1,ihs=1,ipc=1,ieo=0x4,
+  pcd=0x8,ppl=400,lpp=240,...,dither=2`. The 400x234 entry in
+  `display_graphics_map.json` comes from `standard/omap3530.conf`.
+  **Unresolved:** pcd=8 gives 12 MHz / ~80 Hz at a 96 MHz DSS clock, versus
+  the declared refresh=60 (9.03 MHz). The DSS clock source hasn't been traced.
+- **QNX `/dev/i2c2` = OMAP I2C3** (`i2c-omap35xx -p0x48060000 -c400 -i61 -u2`
+  in the startup script; libeeprom `i2c_port=2,i2c_address=0x50`). A second
+  instance drives I2C2 (0x48072000, IRQ 57).
+- **eMMC exists (not in the original findings):** `devb-mmcsd-omap3730teb ...
+  ioport=0x4809c000 ... irq=83`, automounted at `/fs/mmc0`.
+- **`/mnt/persistence/pre_boot.sh` hook exists:** `etc/boot.sh:115-117` runs
+  it in the background if present.
+- **Bluetooth chip is contested.** `wicome.cfg` sets `BT_CHIP = CSR_ROM`,
+  `HCI_TRAN = H4`, while a Marvell 88W8688 driver
+  (`devnp-mv8688uap-sta2x11.so`) also ships in `mnt/persistence`. The active
+  configuration points to CSR for Bluetooth. Whether the Marvell part is
+  populated or used is unknown.
+- **GPIO170 role is contested.** The board/clock/pin handoff calls it the
+  DSP's active-low reset; `display_graphics_map.json` calls it a shared
+  power enable. Both agree that high means running.
+- **GPIO102 edge is contested:** rising (board/clock/pin handoff) vs falling
+  (`dsp_layout_map.json`).
