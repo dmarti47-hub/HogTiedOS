@@ -9,3 +9,7 @@ dl/
 # Stock Harley firmware (ISO, extracted IPL/IFS). Copyrighted, never commit.
 firmware/
 *.iso
+
+# Python bytecode
+__pycache__/
+*.pyc
