@@ -1,0 +1,4 @@
+capstone
+unicorn
+pyelftools
+lzokay
