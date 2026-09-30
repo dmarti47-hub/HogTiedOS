@@ -259,3 +259,35 @@ The pads fall in mainline's three AM3517 pin controllers: core 0x48002030
   mainline reference, 17 "disagree" only by naming (mmc1_ vs sdmmc1_, GPIO
   alias comments). One am35xx board file's McBSP1 comments are off by one
   pad compared with the standard OMAP3 layout the handoff uses.
+
+## 11. Vehicle CAN: arrives through the IOC, per Harley's own source
+
+`secondary/usr/share/lua/service/vehicleCAN/vehicleCAN.lua` (plain-text Lua,
+1213 lines) is the stock decoder for bike data. It reads frames from **IOC IPC
+channel 4** (`chan = ipc.open(4)`; "IPC messages coming from the IOC"). It does
+not read the OMAP HECC controller. This contradicts the DSP handoff's
+`linux-bringup-map.md` §9, which assumes Linux reads the bike via HECC
+(`io-can-shiva /dev/can1` does run in `boot.sh`, but vehicleCAN doesn't use it).
+
+Channel-4 RX message layout (1-based Lua indices): `msg[1]` CAN ID low byte,
+`msg[2]` CAN ID high byte, `msg[3]` not used by any decoder (probably the
+DLC, unverified), `msg[4..11]` CAN data bytes 1-8 ("msg[4] is the first data
+byte"). TX is different: `msg[1]` is an index from `CAN_INDEX_TBL` (not the
+ID), `msg[2]` the length, then data.
+
+Decoded messages (data bytes 0-based; all multi-byte fields big-endian):
+
+| ID | Fields |
+|---|---|
+| 0x530 BODY_CTRL_DATA1 | [4] oil pressure (2 kPa); [6] power mode 0x20 OFF / 0x40 ACC / 0x60 IGN / 0x80 CRANK |
+| 0x531 BODY_CTRL_DATA2 | [0] TPMS flags (0x80 enabled, 0x40/0x20/0x10 low batt LR/R/F, 0x08/0x04/0x02 low pressure LR/R/F, 0x01 telltale); [1]&1 trike; [2..4] tire temp F/R/LR; [5..7] tire pressure F/R/LR (254 error, 255 no value; offset/units applied by the HMI, not here) |
+| 0x540 ENGINE_CTRL_DATA1 | [0..3] total distance (m, ≥0xFFFFFFFE invalid); [4] ambient (<0xFE: raw/2-40 °C); [5..7] fuel used (0.1 ml, ≥0xFFFFFE invalid) |
+| 0x541 ENGINE_CTRL_DATA2 | [0..1] rpm; [2..3] speed (0.1 km/h; 0xFFFE error, 0xFFFF no value); [4..5] engine temp (units not converted in the Lua); [6] gear (value meanings not in the Lua); [7] coolant temp (units not converted) |
+| 0x542 ENGINE_CTRL_DATA3 | [0]&1 overtemp; [1]&2 oil pressure telltale; [1]&0x40 engine running; [2]&2 chassis fan enabled; [2]&0x18 fan mode (0 none, 1 on, 2 off, 3 auto); [3]&8 RCCO enabled |
+| 0x544 ENGINE_CTRL_DATA5 | [2]&8 RCCO active; [2]&0xC0 oil pressure mode (0 none, 1 switch, 2 sensor); [3] oil pressure (2 kPa) |
+| 0x5C0 INSTRUMENT1_DATA1 | [0]&0x20 metric; [0]&0x40 low fuel; [0]&0x80 daytime lighting; [6] photocell |
+| 0x5C1 INSTRUMENT1_DATA2 | [0] s, [1] min, [2] h (speedometer clock); [3..5] battery-connect time; [7]&0x80 24-hour mode |
+| 0x066 LOG_SHUTDOWN | IOC shutdown reasons 1-13 (e.g. 2 = "J3 IPC Watchdog", 10 = low voltage) |
+
+The Lua cites "MY13 HDLAN Normal Mode Message Specification" and
+"Harley-Davidson_rev_4_5.xls" as its sources; we don't have those.
