@@ -5,3 +5,7 @@ handoff.zip
 output/
 dl/
 *.o
+
+# Stock Harley firmware (ISO, extracted IPL/IFS). Copyrighted, never commit.
+firmware/
+*.iso
