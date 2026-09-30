@@ -1,0 +1,329 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * HogTiedOS - Harley-Davidson Boom! Box 6.5GT head unit
+ * SoC: TI DRA523/DRA526 ("Jacinto 3"), OMAP3-family, no public TRM.
+ *
+ * Provenance tags used below (see docs/findings/):
+ *   [confirmed]  read from stock firmware AND matches mainline OMAP3 addresses
+ *   [mainline]   not in our findings; value inherited from the mainline dtsi
+ *   [inferred]   derived from findings, not stated directly by them
+ *   TODO: unconfirmed  a real gap - do not "fix" by guessing
+ *
+ * Pin muxing: NO pad configuration data is available (the IPL pad table was
+ * not extracted), so this file deliberately declares no pinctrl states and
+ * relies on the pads the stock IPL left behind.
+ * TODO: unconfirmed - extract IPL pad table before adding any pinctrl.
+ */
+/dts-v1/;
+
+/*
+ * TODO: unconfirmed - SoC base. am3517.dtsi is chosen because the IPL's
+ * memory-controller sequence matches AM35xx EMIF4 (CROSS_CHECKS.md sec. 1/3).
+ * Kernel prints the CONTROL_IDCODE hawkeye at boot; AM35xx = 0xb868.
+ * If it's something else, switch to omap34xx.dtsi / omap36xx.dtsi.
+ */
+#include "ti/omap/am3517.dtsi"
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "Harley-Davidson Boom! Box 6.5GT (HogTiedOS)";
+	/* "hogtied,boombox-6.5gt" gates the DRAM-controller kernel patch */
+	compatible = "hogtied,boombox-6.5gt", "ti,am3517", "ti,omap3";
+
+	chosen {
+		/* [confirmed] UART3 0x49020000 IRQ 74, 115200 8N1 debug console */
+		stdout-path = "serial2:115200n8";
+		bootargs = "console=ttyS2,115200n8 earlycon";
+	};
+
+	/*
+	 * DRAM.
+	 * [inferred] base 0x80000000: IPL uses data at 0x8000801c and the
+	 * stock image loads at 0x80100000, so DRAM covers at least that range.
+	 *
+	 * TODO: unconfirmed - SIZE IS UNKNOWN. Not derivable from the captured
+	 * EMIF4 SDRAM_CONFIG (0x40801632 / 0x408016b2 depending on package
+	 * strap). The stock startup header's ram_size (0x3512ac) is only a
+	 * relocation window, NOT total DRAM. Size 0 is deliberate: the image
+	 * loader / packer must supply the real size (or this must be filled in
+	 * once it's known). Do not replace with a "typical" value.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x0>;
+	};
+
+	/*
+	 * [confirmed] GPIO170 (gpio6 bit 10) is a shared board power enable:
+	 * devg-omap35xx drives it HIGH to bring the panel up, and the audio
+	 * power-amp code releases it (SETDATAOUT) before amp init. Modeled as
+	 * one regulator so display and audio share it instead of both claiming
+	 * the pin.
+	 * TODO: unconfirmed - README says it is asserted only after an
+	 * ignition-on CAN message; whether Linux may raise it unconditionally
+	 * at boot is not established. Rail voltage unknown (none declared).
+	 */
+	board_pwr_en: regulator-board-pwr-en {
+		compatible = "regulator-fixed";
+		regulator-name = "board_pwr_en";
+		gpio = <&gpio6 10 GPIO_ACTIVE_HIGH>;	/* GPIO170 */
+		enable-active-high;
+	};
+
+	/*
+	 * [confirmed] 400x234 RGB565 panel, timing from the single active
+	 * entry in stock /etc/system/config/omap3530.conf:
+	 *   hsw=2 hfp=34 hbp=84 vsw=1 vfp=32 vbp=17 ivs=1 ihs=1 ipc=1 ieo=0x4
+	 *   pcd=0xb ppl=400 lpp=234 lcdfmt=0x1 (16-bit)
+	 * Totals 520 x 284 at 96 MHz / 11 = 8.727 MHz (about 59.1 Hz).
+	 *
+	 * TODO: unconfirmed - whether hsw/hfp/hbp/vsw/vfp/vbp are real
+	 * cycle counts or DISPC register encodings (OMAP DISPC stores
+	 * several as value-1). The QNX DISPC timing writes were never
+	 * found (display_graphics_map.json: dispc_register_sequence_TRACED).
+	 * Values below take them as real counts.
+	 * TODO: unconfirmed - ieo=0x4 (data-enable polarity) meaning unknown;
+	 * de-active left unspecified.
+	 * TODO: unconfirmed - panel part number / compatible unknown.
+	 */
+	lcd0: display {
+		compatible = "panel-dpi";
+		label = "lcd";
+		power-supply = <&board_pwr_en>;
+
+		panel-timing {
+			clock-frequency = <8727273>;
+			hactive = <400>;
+			vactive = <234>;
+			hfront-porch = <34>;
+			hback-porch = <84>;
+			hsync-len = <2>;
+			vfront-porch = <32>;
+			vback-porch = <17>;
+			vsync-len = <1>;
+			hsync-active = <0>;	/* ihs=1: active low */
+			vsync-active = <0>;	/* ivs=1: active low */
+			pixelclk-active = <0>;	/* ipc=1: sampled on rising edge */
+		};
+
+		port {
+			lcd_in: endpoint {
+				remote-endpoint = <&dpi_out>;
+			};
+		};
+	};
+
+	/*
+	 * Backlight: [confirmed-ish, medium-high] no OMAP PWM is used; brightness
+	 * is a devctl message to the front controller over IPC ch3. No DT node.
+	 * TODO: unconfirmed - exact message bytes.
+	 */
+};
+
+/* [confirmed] DSS 0x48050000, DISPC IRQ 25, DPI output, 16 data lines */
+&dss {
+	status = "okay";
+
+	port {
+		dpi_out: endpoint {
+			remote-endpoint = <&lcd_in>;
+			data-lines = <16>;
+		};
+	};
+};
+
+/* [confirmed] UART1 0x4806A000 IRQ 72 - SDARS/SiriusXM, 57600 baud.
+ * Stock only opens it when GPIO94 (SDARSPresent, gpio3 bit 30) reads 1;
+ * userspace must do the same check. */
+&uart1 {
+	status = "okay";
+};
+
+/* [confirmed] UART2 0x4806C000 IRQ 73 - u-blox GPS. 9600 -> PUBX,41 -> 57600.
+ * GPS reset is GPIO112 (gpio4 bit 16).
+ * TODO: unconfirmed - reset polarity; not declared here. */
+&uart2 {
+	status = "okay";
+};
+
+/* [confirmed] UART3 0x49020000 IRQ 74 - debug console */
+&uart3 {
+	status = "okay";
+};
+
+/*
+ * [confirmed] I2C EEPROM at 7-bit 0x50 holding IPL boot state:
+ * partitionValid @0x0000, bootmode @0x0008, ifsSizeInMB @0x000D,
+ * currentIFS @0x0FD0, touchCal @0x1874.
+ * TODO: unconfirmed - which OMAP I2C controller QNX's /dev/i2c2 is
+ * (i2c2 or i2c3 depending on QNX numbering). Placed on &i2c2 but DISABLED.
+ * [inferred] >= 8 KiB (touchCal ends at 0x1890) -> 24c64-class; exact part
+ * TODO: unconfirmed.
+ * read-only: this EEPROM decides which IFS slot the IPL boots. Nothing in
+ * Linux may write it without an explicit, reviewed change.
+ */
+&i2c2 {
+	boot_eeprom: eeprom@50 {
+		compatible = "atmel,24c64";
+		reg = <0x50>;
+		read-only;
+		status = "disabled";
+	};
+
+	/* TODO: unconfirmed - audio power amp "device id 0x6f" on the same
+	 * QNX bus; unclear if 0x6f is a 7-bit address. Not declared. */
+};
+
+/*
+ * Audio DSP (ADI Sigma200-family) on McSPI2 CS0, 6 MHz, mode 0, 8-bit words
+ * [confirmed: /dev/spi0 args + CHCONF replay].
+ * [mainline] McSPI2 base 0x4809a000 / IRQ 66 are not in our findings.
+ * No driver yet; DSP reset/enable GPIOs (GPIO99/109-111/113 on gpio4,
+ * GPIO170 shared) are not fully understood, so the device is disabled.
+ * TODO: unconfirmed - DSP boot method, which pin truly resets the DSP.
+ */
+&mcspi2 {
+	status = "okay";
+
+	audio_dsp: dsp@0 {
+		compatible = "hogtied,sigma200-dsp";	/* placeholder, no driver */
+		reg = <0>;
+		spi-max-frequency = <6000000>;
+		status = "disabled";
+	};
+};
+
+/*
+ * Front controller / IOC (2x Renesas 78K0R) on McSPI3, 1 MHz, 2 CS
+ * [confirmed: 0x480B8000 IRQ 91, dev-ipc -M3 -C0 -K1000000].
+ * TODO: unconfirmed - IPC_REQ/IPC_ACK handshake lines "IRQ 136,137" are
+ * QNX-remapped numbers (> 96 INTC lines), GPIO mapping unknown; SPI mode
+ * word 0x608 not decoded; dev-ipc framing unknown. Devices disabled.
+ */
+&mcspi3 {
+	status = "okay";
+
+	front_ctrl: mcu@0 {
+		compatible = "hogtied,dev-ipc";		/* placeholder, no driver */
+		reg = <0>;
+		spi-max-frequency = <1000000>;
+		status = "disabled";
+	};
+
+	ioc: mcu@1 {
+		compatible = "hogtied,dev-ipc";		/* placeholder, no driver */
+		reg = <1>;
+		spi-max-frequency = <1000000>;
+		status = "disabled";
+	};
+};
+
+/*
+ * [confirmed] Marvell 88W8688 BT/WiFi over SDIO on MMC3 (0x480AD000 IRQ 94),
+ * SDIO VID 0x02DF PID 0x3130 -> mainline libertas_sdio (sd8688 firmware).
+ * TODO: unconfirmed - bus width, card power/reset GPIO, supply. Until those
+ * are known the card may never enumerate.
+ */
+&mmc3 {
+	status = "okay";
+	non-removable;
+	cap-power-off-card;
+	bus-width = <1>;	/* TODO: unconfirmed - 1-bit until real width known */
+};
+
+/* [confirmed] MMC2 0x480B4000 IRQ 86 is a disabled "secondary BT chip" slot
+ * in stock firmware (commented out in bluetooth.sh). Keep off. */
+&mmc2 {
+	status = "disabled";
+};
+
+/*
+ * Boot NAND on GPMC 0x6E000000 [confirmed]: 2048+64 B pages, 64 pages/block
+ * (128 KiB), 2048 blocks = 256 MiB, 4-bit BCH ECC (IPL ECC_SIZE_CONFIG
+ * 0x3fcff000).
+ *
+ * DISABLED and every partition read-only. Per PROJECT_DECISIONS.md, NAND is
+ * only ever written by stock update_nand_teb, never from Linux, and the IPL
+ * is never written at all.
+ * TODO: unconfirmed - GPMC chip select (0 assumed), GPMC timings (IPL NAND
+ * timing init was not traced), whether Linux's omap2 BCH4 OOB layout matches
+ * the IPL's (plus the IPL's per-page sequence number at OOB +4).
+ */
+&gpmc {
+	ranges = <0 0 0x30000000 0x1000000>;	/* TODO: unconfirmed - CS0 window */
+
+	nand@0,0 {
+		compatible = "ti,omap2-nand";
+		reg = <0 0 4>;				/* TODO: unconfirmed - CS0 */
+		interrupt-parent = <&gpmc>;
+		interrupts = <0 IRQ_TYPE_NONE>,		/* fifoevent */
+			     <1 IRQ_TYPE_NONE>;		/* termcount */
+		nand-bus-width = <8>;			/* TODO: unconfirmed */
+		ti,nand-ecc-opt = "bch4";		/* TODO: unconfirmed layout */
+		status = "disabled";
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			/* [confirmed] nand_partition.txt, block = 0x20000 */
+			partition@0 {
+				label = "IPL0";		/* block 0 */
+				reg = <0x00000000 0x00020000>;
+				read-only;
+			};
+			partition@20000 {
+				label = "IPL1";		/* block 1 */
+				reg = <0x00020000 0x00020000>;
+				read-only;
+			};
+			partition@40000 {
+				label = "IPL2";		/* block 2 */
+				reg = <0x00040000 0x00020000>;
+				read-only;
+			};
+			partition@60000 {
+				label = "IPL3";		/* block 3 */
+				reg = <0x00060000 0x00020000>;
+				read-only;
+			};
+			partition@80000 {
+				label = "IFS0";		/* blocks 4-339 */
+				reg = <0x00080000 0x02a00000>;
+				read-only;
+			};
+			partition@2a80000 {
+				label = "IFS1";		/* blocks 340-675 */
+				reg = <0x02a80000 0x02a00000>;
+				read-only;
+			};
+			partition@5480000 {
+				label = "IFS2";		/* blocks 676-1011 */
+				reg = <0x05480000 0x02a00000>;
+				read-only;
+			};
+			partition@7e80000 {
+				/* TODO: unconfirmed - blocks 1012-1027 unaccounted
+				 * for in nand_partition.txt; purpose unknown */
+				label = "unknown-gap";
+				reg = <0x07e80000 0x00200000>;
+				read-only;
+			};
+			partition@8080000 {
+				label = "ETFS";		/* blocks 1028-2047, /mnt/persistence */
+				reg = <0x08080000 0x07f80000>;
+				read-only;
+			};
+		};
+	};
+};
+
+/*
+ * Not declared (no confirmed data yet):
+ *  - McBSP2 for Bluetooth SCO audio (BTClockSet register values not traced)
+ *  - GPIO102 (gpio4 bit 6): falling-edge input used by the audio service,
+ *    purpose unknown
+ *  - GPIO169 (gpio6 bit 9): touched by display init, role unknown
+ *  - SGX530: intentionally unused (software rendering)
+ */
