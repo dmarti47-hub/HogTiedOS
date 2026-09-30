@@ -39,5 +39,6 @@ BR2_TARGET_ROOTFS_CPIO=y
 BR2_TARGET_ROOTFS_INITRAMFS=y
 # BR2_TARGET_ROOTFS_TAR is not set
 
-# No U-Boot: the stock QNX IPL is the bootloader. The QNX-format IFS packer
-# (post-image step) is not written yet.
+# No U-Boot: the stock QNX IPL is the bootloader. post-image.sh wraps
+# zImage + DTB into images/hogtied.ifs (tools/ifs-pack) and validates it.
+BR2_ROOTFS_POST_IMAGE_SCRIPT="$(BR2_EXTERNAL_HOGTIED_PATH)/board/boombox/post-image.sh"

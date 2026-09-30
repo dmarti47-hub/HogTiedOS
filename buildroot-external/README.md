@@ -14,11 +14,20 @@ make -C buildroot-2025.02.18 BR2_EXTERNAL=$PWD/buildroot-external O=$PWD/output 
 make -C buildroot-2025.02.18 O=$PWD/output
 ```
 
-Output lands in `output/images/`: `zImage` (with the initramfs built in) and
-`hogtied-boombox.dtb`.
+**After editing the DTS, kernel patch or fragment**, run
+`make -C buildroot-2025.02.18 O=$PWD/output linux-rebuild all`. Buildroot
+doesn't notice changes to external-tree kernel inputs, and a plain `make`
+silently packs the old DTB.
 
-**This output is not bootable yet, and nothing in this tree writes to
-hardware.** It still needs the QNX-format IFS packer (see below).
+Output lands in `output/images/`:
+- `hogtied.ifs`: the bootable image for one IFS slot. It's built and validated
+  by `board/boombox/post-image.sh` using `tools/ifs-pack/`.
+- `zImage` (initramfs built in) and `hogtied-boombox.dtb`: its inputs.
+
+**Nothing in this tree writes to hardware.** Getting `hogtied.ifs` onto the
+unit is a separate, manual step through stock `update_nand_teb` (see
+`docs/findings/PROJECT_DECISIONS.md`). Before that, check the image against
+the real stock IPL in the emulator (`tools/ifs-pack/test_mkifs.py`).
 
 ## Layout
 
@@ -40,22 +49,17 @@ package/                            custom packages (none yet)
 - **NAND is disabled in the DT, and every partition is `read-only`**,
   including all four IPL copies. Flashing only ever happens through stock
   `update_nand_teb`, per `docs/findings/PROJECT_DECISIONS.md`.
-- **The boot-state EEPROM (I2C 0x50) is disabled and `read-only`.** It holds
+- **The boot-state EEPROM (I2C3, 0x50) is `read-only` in the DT.** It holds
   the IFS-slot valid flags the IPL uses to pick a slot.
+- **The boot shim touches nothing but UART3.** No DRAM, clock, pad or NAND
+  access; it only jumps to the kernel.
 
 ## Known gaps (see TODO markers in the DTS)
 
-- DRAM size is unknown. The memory node has size 0 on purpose.
 - SoC base (`am3517.dtsi`) is tentative. It gets confirmed from the kernel's
   IDCODE print on the first UART boot.
-- There's no pinctrl, because the IPL pad table hasn't been extracted.
+- There's no pinctrl yet. The IPL pad table has now been extracted (board/
+  clock/pin handoff) but hasn't been turned into DT pinctrl.
+- 512 MiB units run with 256 MiB until the shim reads EMIF4 ROWSIZE.
+- Display pixel clock is unresolved (pcd=8 vs refresh=60).
 - The DSP and IOC SPI devices are placeholders with no drivers.
-- Panel timing encoding (real counts vs. DISPC register values) is unconfirmed.
-
-## Not written yet: IFS packer
-
-A post-image step has to wrap `zImage` + DTB in a QNX startup-header image
-the stock IPL accepts (signature `0x00FF7EEB`, two sum-to-zero regions) with
-a small loader shim at `startup_vaddr`. It also needs a validator that runs
-before any image goes near NAND. Several of its inputs are still open; see
-`docs/findings/CROSS_CHECKS.md` sec. 6.
