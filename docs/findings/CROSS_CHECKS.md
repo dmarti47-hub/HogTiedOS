@@ -1,0 +1,136 @@
+# Cross-checks against public sources
+
+Findings from checking the handoff files against upstream U-Boot and Linux
+source. Nothing here was tested on hardware either. The original JSON files are
+left unmodified; this file records where they are corroborated, contradicted, or
+corrected.
+
+Sources used: U-Boot `master` (`arch/arm/mach-omap2/omap3/emif4.c`,
+`arch/arm/include/asm/arch-omap3/{cpu.h,emif4.h}`), Linux `master` / v6.18.54
+(`arch/arm/mach-omap2/{io.c,id.c,sdrc.c,pdata-quirks.c}`,
+`arch/arm/boot/dts/ti/omap/{omap3,omap34xx,am3517}.dtsi`).
+
+## 1. Memory controller at 0x6D000000 is very likely TI EMIF4 (AM35xx)
+
+**Confidence: high on the identification, from structural match. Not
+confirmed by any TI document for DRA52x.**
+
+The IPL's DDR sequence (`boot_path_map.json` → `ddr_controller_ipl_config`)
+matches U-Boot's AM35xx `do_emif4_init()` step for step, and every offset it
+writes is a field of U-Boot's `emif4_t`:
+
+| Offset | EMIF4 field (U-Boot)        | IPL value      | U-Boot AM3517 EVM value | Match |
+|--------|-----------------------------|----------------|-------------------------|-------|
+| 0xE4/E8| DDR_PHYCTRL1 / _SHDW        | 0x8006         | 0x6                     | differs (bit 15) |
+| 0xEC   | DDR_PHYCTRL2                | 0x0            | 0x0                     | exact |
+| 0x60   | SDRAM_IODFT_TLGC (bit10 = PHY reset, bit0 after) | RMW | RMW         | same sequence |
+| 0x04   | SDRAM_STS (bit2 = PHY ready)| poll bit 2     | poll bit 2              | same |
+| 0x18/1C| SDRAM_TIM_1 / _SHDW         | 0x06803292     | 0x06668292              | board-specific |
+| 0x20/24| SDRAM_TIM_2 / _SHDW         | 0x201C320A     | 0x201C320A              | **exact** |
+| 0x28/2C| SDRAM_TIM_3 / _SHDW         | 0x257          | 0x257                   | **exact** |
+| 0x38/3C| PWR_MGMT_CTRL / _SHDW       | 0x80000000     | 0x80000000              | **exact** |
+| 0x10/14| SDRAM_REF_CTRL / _SHDW      | 0x50F          | 0x50F                   | **exact** |
+| 0x08   | SDRAM_CONFIG                | 0x40801632 / 0x408016B2 | 0x40801432     | differs only in ROWSIZE [9:7] |
+
+This explains the "CS0/CS1 pairs 4 bytes apart" oddity: those are EMIF4
+register/shadow-register pairs, not CS0/CS1.
+
+Corrections to `boot_path_map.json`:
+- The 0x6d000020 composite is `2|8|0x3200|0x1c0000|0x20000000` = **0x201C320A**,
+  not 0x201c3200 as written.
+- The IPL is described as polling 0x6d000060 bit 0x400 "until set"; U-Boot polls
+  until it *clears*. Worth re-checking the disassembly branch sense. It doesn't
+  affect us, since we never run this code.
+
+**What this does NOT resolve: DRAM size.** On EMIF4 with DDR2 (SDRAM_TYPE=2),
+ROWSIZE appears not to define capacity. U-Boot's AM3517 EVM uses ROWSIZE=0 and
+hard-codes 256 MiB. So the package-strap-dependent ROWSIZE difference can't be
+turned into a size. **DRAM size stays unknown.**
+
+**The "never write DDR/SDRC init" rule is unchanged.** This only tells us what
+the silicon we're avoiding probably is.
+
+## 2. Mainline Linux writes to 0x6D000000 during boot (hazard)
+
+**Confidence: confirmed by reading kernel source.**
+
+For any DT whose root is compatible with `ti,omap3`, `pdata_quirks_init()` calls
+`omap_sdrc_init(NULL, NULL)` → `omap2_sdrc_init()`, which:
+
+- RMWs `0x6C000010` (SMS_SYSCONFIG on OMAP3)
+- RMWs `0x6D000010` (SDRC_SYSCONFIG on OMAP3; **SDRAM_REF_CTRL on EMIF4**):
+  clears bits 4:3 and sets bit 4, turning refresh 0x50F into 0x517
+- writes `0x6D000070` (SDRC_POWER on OMAP3; a reserved hole on EMIF4)
+
+It then calls `_omap2_init_reprogram_sdrc()` (a DPLL3 M2 set_rate with the
+current rate). The omap3 PM/idle code also touches SDRC_POWER in
+`omap_sram_idle()`.
+
+Mitigation in this repo: a kernel patch skips `omap_sdrc_init()` for
+`hogtied,boombox-6.5gt`, and the kernel config fragment disables CONFIG_PM,
+CONFIG_CPU_IDLE and CONFIG_CPU_FREQ.
+
+## 3. SoC base: AM35xx vs OMAP3530
+
+EMIF4 is an AM35xx trait (OMAP3530 has SDRC), and `boot_path_map.json` already
+notes "the AM35xx CM/PRM map used elsewhere". The QNX driver names
+(`omap3530.conf`, `devg-omap35xx`, `-domap3530`) point the other way. That's
+weak evidence, though, since AM35xx BSPs reuse the OMAP35xx drivers.
+
+**Decision: base the DTS on `am3517.dtsi`, marked tentative.** The kernel
+prints the CONTROL_IDCODE hawkeye on boot (`id.c`); AM35xx is `0xb868`. The
+first UART boot log settles this. A wrong base means wrong clock setup
+(peripherals don't come up), not a brick risk.
+
+## 4. Address and IRQ cross-check vs mainline `omap3.dtsi`
+
+Every MMIO base and IRQ in the findings matches mainline:
+
+| Block  | Findings           | Mainline             |
+|--------|--------------------|----------------------|
+| UART1  | 0x4806A000 IRQ 72  | 0x4806a000, 72       |
+| UART2  | 0x4806C000 IRQ 73  | 0x4806c000, 73       |
+| UART3  | 0x49020000 IRQ 74  | 0x49020000, 74       |
+| McSPI3 | 0x480B8000 IRQ 91  | 0x480b8000, 91       |
+| MMC3   | 0x480AD000 IRQ 94  | 0x480ad000, 94       |
+| MMC2   | 0x480B4000 IRQ 86  | 0x480b4000, 86       |
+| DSS    | 0x48050000 IRQ 25  | 0x48050000, 25       |
+| DSI    | 0x4804FC00         | 0x4804fc00           |
+| GPMC   | 0x6E000000         | 0x6e000000           |
+| INTC   | 0x48200000         | 0x48200000           |
+| GPIO1/5/6 | 0x48310000 / 0x49056000 / 0x49058000 | same |
+
+**Contradiction:** `display_graphics_map.json` says 0x5D000000 "is the
+documented, correct OMAP3530 SGX530 register base". In mainline OMAP3 DTs,
+0x5D000000 is the **IVA2 MMU** (`mmu_iva`), and SGX is at **0x50000000**. What
+devg-omap35xx maps there is unknown. This doesn't matter to us because we
+aren't using SGX.
+
+McSPI2 (the DSP bus) has no base address in the findings. Mainline puts it at
+0x4809a000, IRQ 66, and the DTS uses that as mainline-derived.
+
+## 5. Other corrections and inconsistencies
+
+- **GPIO bitmask arithmetic** (`dsp_layout_map.json` → `dsp_init_0x126a08`):
+  `0x2e008` is bits 3, 13, 14, 15, 17, i.e. **GPIO99, 109, 110, 111, 113**, not
+  "3,13,15,16,17". GPIO112 (GPS reset) is therefore *not* touched by DSP init.
+  This agrees with the pwramp code's `0xE000` (bits 13–15 = GPIO109–111).
+- **IPC handshake IRQs 136/137** (`ioc_link_map.json`) exceed the OMAP3 INTC's
+  96 lines, so they are QNX-remapped numbers (probably GPIO interrupts). **The
+  GPIO mapping is unknown**, and it blocks a front/IOC driver.
+- **Boot-mode channel:** `ioc_link_map.json` says ioc-boot-mode reads "ch8", but
+  dev-ipc runs with `-c8`, which gives ch0–ch7. `boot_path_map.json` says boot
+  mode comes over `/dev/i2c0`. These can't all be right as written. Unresolved.
+- **QNX I2C numbering:** which OMAP I2C instance `/dev/i2c2` (EEPROM 0x50) is
+  hasn't been established. The DTS treats this as unknown.
+- **EEPROM size lower bound:** the `touchCal` field at 0x1874 + 28 bytes means
+  the part is at least 8 KiB (≥ 24C64-class). Exact part unknown.
+
+## 6. Open items that gate the image packer (not yet in any findings file)
+
+- Where the IPL copies the image in RAM (whole `stored_size` to `image_paddr`?),
+  and the CPU state/registers at the jump to `startup_vaddr` (MMU and caches
+  off? r0–r2?). A Linux loader shim needs both.
+- Whether the IPL caps the read length by the EEPROM `ifsSizeInMB` field /
+  `set-ifs-size`. This bounds our image size.
+- The byte offset of the startup header within a slot (the IPL scans for it).
