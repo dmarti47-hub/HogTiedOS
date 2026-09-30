@@ -179,7 +179,7 @@ bool hbas_ambient_c_x10(const struct hbas_vehicle *v, int *c_x10)
 
 const char *hbas_ignition_name(enum hbas_ignition ign)
 {
-	static const char *const names[] = { "UNKNOWN", "OFF", "ACC", "IGN", "CRANK" };
+	static const char *const names[] = { "--", "OFF", "ACC", "ON", "CRANK" };
 
 	return (unsigned)ign < sizeof(names) / sizeof(names[0]) ? names[ign] : "UNKNOWN";
 }

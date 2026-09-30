@@ -1,0 +1,8 @@
+config BR2_PACKAGE_HOGTIED_UI
+	bool "hogtied-ui"
+	select BR2_PACKAGE_HOGTIED_LVGL
+	help
+	  HogTiedOS main screen (LVGL 9.2.2 on the Linux framebuffer):
+	  speed, gear, rpm, warnings, clock and tire data decoded from
+	  bike CAN frames by libhbas. Sources live in software/ in the
+	  HogTiedOS repository.

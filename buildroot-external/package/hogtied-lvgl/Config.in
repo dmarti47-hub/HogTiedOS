@@ -1,0 +1,5 @@
+config BR2_PACKAGE_HOGTIED_LVGL
+	bool
+	help
+	  LVGL 9.2.2 sources for hogtied-ui (source only; hogtied-ui
+	  builds it with its own lv_conf.h).

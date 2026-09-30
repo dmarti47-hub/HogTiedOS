@@ -1,1 +1,3 @@
 # HogTiedOS custom packages. Add a `source` line per package/<name>/Config.in.
+source "$BR2_EXTERNAL_HOGTIED_PATH/package/hogtied-ui/Config.in"
+source "$BR2_EXTERNAL_HOGTIED_PATH/package/hogtied-lvgl/Config.in"

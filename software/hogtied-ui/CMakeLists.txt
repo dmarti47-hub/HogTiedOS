@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.16)
+project(hogtied-ui C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_EXTENSIONS ON)
+
+option(HOGTIED_FBDEV "Build the Linux framebuffer backend (target)" OFF)
+set(LVGL_DIR "" CACHE PATH "Path to an LVGL v9.2.2 source tree")
+
+if(NOT LVGL_DIR)
+  message(FATAL_ERROR "Set -DLVGL_DIR=<lvgl v9.2.2 source> "
+                      "(https://github.com/lvgl/lvgl/archive/refs/tags/v9.2.2.tar.gz)")
+endif()
+
+# LVGL picks up our lv_conf.h through LV_CONF_PATH
+set(LV_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lv_conf.h CACHE STRING "" FORCE)
+set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+add_subdirectory(${LVGL_DIR} lvgl EXCLUDE_FROM_ALL)
+if(HOGTIED_FBDEV)
+  target_compile_definitions(lvgl PUBLIC HOGTIED_FBDEV)
+endif()
+
+set(HBAS_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(../libhbas libhbas)
+
+add_executable(hogtied-ui src/main.c src/ui.c src/demo.c)
+target_link_libraries(hogtied-ui PRIVATE lvgl hbas m)
+target_compile_options(hogtied-ui PRIVATE -Wall -Wextra -Werror)
+install(TARGETS hogtied-ui RUNTIME DESTINATION bin)
