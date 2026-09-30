@@ -33,6 +33,7 @@ UART_LSR = UART3 + 0x14
 # Free-running counter the IPL's delay loop (0x40200E90) spins on; the loop
 # masks it and handles wrap, so any monotonic tick works.
 DELAY_COUNTER = 0x49030028
+IPL_LOAD_ADDR = 0x84000000   # the IPL reads the whole image here (measured)
 
 # GPMC (confirmed base 0x6E000000), CS0 NAND registers
 GPMC = 0x6E000000
@@ -191,6 +192,8 @@ class IplEmu:
         # Anything executed outside the IPL (SRAM copy / DRAM copy) is the
         # handoff into the loaded image: stop there and record CPU state.
         self.handoff = None
+        self.kernel_entry = None
+        self.follow = False        # keep running past the handoff (our shim)
         u.hook_add(UC_HOOK_CODE, self._on_handoff, begin=DRAM_BASE + 0x10000,
                    end=DRAM_BASE + DRAM_SIZE - 1)
 
@@ -309,15 +312,23 @@ class IplEmu:
         if self._code_off(pc) in self.smc:
             uc.reg_write(UC_ARM_REG_PC, pc + 4)
 
-    def _on_handoff(self, uc, pc, size, _):
-        sctlr = uc.reg_read(UC_ARM_REG_CP_REG, (15, 0, 0, 1, 0, 0, 0))
-        self.handoff = {
+    def _cpu_state(self, uc, pc):
+        return {
             'pc': pc,
             'regs': [uc.reg_read(UC_ARM_REG_R0 + i) for i in range(4)],
             'cpsr': uc.reg_read(UC_ARM_REG_CPSR),
-            'sctlr': sctlr,
+            'sctlr': uc.reg_read(UC_ARM_REG_CP_REG, (15, 0, 0, 1, 0, 0, 0)),
         }
-        uc.emu_stop()
+
+    def _on_handoff(self, uc, pc, size, _):
+        if self.handoff is None:
+            self.handoff = self._cpu_state(uc, pc)
+            if not self.follow:
+                uc.emu_stop()
+        elif IPL_LOAD_ADDR <= pc < IPL_LOAD_ADDR + 0x2A00000:
+            # Code running inside the payload the IPL loaded = kernel entry.
+            self.kernel_entry = self._cpu_state(uc, pc)
+            uc.emu_stop()
 
     def _on_intr(self, uc, intno, _):
         pc = uc.reg_read(UC_ARM_REG_PC)
