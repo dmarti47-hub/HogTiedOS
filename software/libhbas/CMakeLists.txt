@@ -4,8 +4,9 @@ project(libhbas C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)          # tests use statement expressions
 
-add_library(hbas STATIC src/vehicle.c src/ioc.c src/buttons.c src/audio.c)
+add_library(hbas STATIC src/vehicle.c src/ioc.c src/buttons.c src/audio.c src/eq.c)
 target_include_directories(hbas PUBLIC include)
+target_link_libraries(hbas PUBLIC m)
 target_compile_options(hbas PRIVATE -Wall -Wextra -Werror)
 
 option(HBAS_TESTS "Build libhbas unit tests" ON)
@@ -27,6 +28,10 @@ if(HBAS_TESTS)
   target_link_libraries(test_audio hbas)
   target_compile_options(test_audio PRIVATE -Wall -Wextra -Werror)
   add_test(NAME audio COMMAND test_audio)
+  add_executable(test_eq tests/test_eq.c)
+  target_link_libraries(test_eq hbas)
+  target_compile_options(test_eq PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME eq COMMAND test_eq)
 endif()
 
 install(TARGETS hbas ARCHIVE DESTINATION lib)

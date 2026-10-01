@@ -68,6 +68,11 @@ volume control, i.e. speed-sensitive volume) and a built-in fallback
   the stock EQ file naming (tested).
 - `hogtied-ui` Audio page: Volume, Bass, Treble, Fade, Output; the EQ profile
   follows the engine-running flag from the bike.
+- `hogtied-ui` EQ page + `software/libhbas/eq.c`: a 5-band graphic EQ
+  (60 Hz, 250 Hz, 1 kHz, 4 kHz, 12 kHz, ±10 dB) with presets, made of RBJ
+  peaking biquads. They're encoded in the verified DSP format (sec. 6) and
+  packed into one safe-load of 25 words. Five EQ biquads plus the two stock
+  tone filters fill exactly one 7-biquad set.
 - **Backend: logging only.** Every change produces the dB values a DSP backend
   would apply, but nothing is sent: the parameter-level writes behind
   0x906/0x907/0x913 aren't known yet.
@@ -96,7 +101,11 @@ points aren't. Record with timestamps, and note each HMI action as it's made.
 | 8 | Change source (media → phone → nav) | 0x90C, mixer writes | input gain / mixer |
 | 9 | Ride or replay speed changes | AVC-related writes | speed-sensitive volume curve |
 
-Items 2-5 are what the Audio page needs. Static analysis of `audioCtrlSvc`'s
+Items 2-5 are what the Audio page needs. For the EQ page, item 3 also
+answers which biquad slots carry tone and whether any are free for a user
+EQ, and the DSP sample rate (needed to compute coefficients) can be checked
+by capturing a known bass/treble step and comparing its coefficients with
+the RBJ formulas at 44.1 vs 48 kHz. Static analysis of `audioCtrlSvc`'s
 `gain_services_*` and `fixed_tone_*` routines could recover some of it before
 any capture; the capture then confirms it.
 

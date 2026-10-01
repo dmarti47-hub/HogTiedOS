@@ -13,6 +13,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "hbas/eq.h"
+
 #define HBAS_VOL_STEPS   18   /* 0..17, step 0 = mute */
 #define HBAS_TONE_STEPS  17   /* 0..16 */
 #define HBAS_FADE_STEPS  17   /* 0..16, 8 = centre */
@@ -72,6 +74,7 @@ struct hbas_audio_backend {
 	void (*apply)(void *ctx, const struct hbas_audio_db *db, bool muted,
 		      enum hbas_audio_output out);
 	void (*load_eq_profile)(void *ctx, const char *name);
+	void (*apply_eq)(void *ctx, const struct hbas_eq *eq);   /* user graphic EQ */
 };
 
 #endif

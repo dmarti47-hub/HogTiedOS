@@ -159,6 +159,7 @@ void ui_audio_build(lv_obj_t *p)
 void ui_set_audio_backend(const struct hbas_audio_backend *b)
 {
 	backend = b;
+	ui_eq_set_backend(b);
 	apply();
 	refresh();
 }

@@ -3,6 +3,7 @@
  * HogTiedOS main UI: 400x240, pages switched with LEFT/RIGHT.
  *   Dash   - speed, gear, rpm, warnings, clock, ambient temperature
  *   Audio  - volume, tone, fade, output, automatic EQ (ui_audio.c)
+ *   EQ     - 5-band graphic EQ with response curve (ui_eq.c)
  *   Tires  - TPMS values
  *   System - build and data status
  * Values the stock software doesn't convert (gear meaning, tire units) are
@@ -210,10 +211,12 @@ void ui_create(void)
 
 	pages[UI_PAGE_DASH] = page_create(scr, "HOGTIED");
 	pages[UI_PAGE_AUDIO] = page_create(scr, "AUDIO");
+	pages[UI_PAGE_EQ] = page_create(scr, "EQ");
 	pages[UI_PAGE_TIRES] = page_create(scr, "TIRES");
 	pages[UI_PAGE_SYSTEM] = page_create(scr, "SYSTEM");
 	build_dash(pages[UI_PAGE_DASH]);
 	ui_audio_build(pages[UI_PAGE_AUDIO]);
+	ui_eq_build(pages[UI_PAGE_EQ]);
 	build_tires(pages[UI_PAGE_TIRES]);
 	build_system(pages[UI_PAGE_SYSTEM]);
 
@@ -306,6 +309,8 @@ void ui_update(const struct hbas_vehicle *v)
 void ui_key(enum ui_key key)
 {
 	if (page == UI_PAGE_AUDIO && ui_audio_key(key))
+		return;
+	if (page == UI_PAGE_EQ && ui_eq_key(key))
 		return;
 	if (key == UI_KEY_RIGHT)
 		show_page((page + 1) % UI_PAGE_COUNT);

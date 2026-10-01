@@ -143,7 +143,33 @@ static void log_eq(void *ctx, const char *name)
 		fprintf(stderr, "audio: EQ profile %s (not sent: DSP map unknown)\n", name);
 }
 
-static const struct hbas_audio_backend log_backend = { NULL, log_apply, log_eq };
+/* What a DSP backend would send for the user EQ: one safe-load of five
+ * biquads. Which biquad slots the user EQ may own is still open. */
+static void log_user_eq(void *ctx, const struct hbas_eq *eq)
+{
+	int32_t words[HBAS_EQ_BANDS * 5];
+	uint8_t frames[3][3 + 4 * HBAS_DSP_SAFELOAD_MAX];
+	size_t len[3];
+	int ok = 1;
+
+	(void)ctx;
+	for (int b = 0; b < HBAS_EQ_BANDS; b++) {
+		struct hbas_biquad bq;
+
+		hbas_biquad_peaking(&bq, HBAS_DSP_FS, hbas_eq_band_hz[b], eq->gain_db[b], HBAS_EQ_Q);
+		ok &= hbas_biquad_to_dsp(&bq, &words[5 * b]) == 0;
+	}
+	if (audio_log_quiet)
+		return;
+	fprintf(stderr, "audio: user EQ %s [%+d %+d %+d %+d %+d] dB -> %s%zu-frame safe-load "
+		"of %d words (not sent: DSP slot unknown)\n",
+		hbas_eq_preset_name(eq->preset), eq->gain_db[0], eq->gain_db[1], eq->gain_db[2],
+		eq->gain_db[3], eq->gain_db[4], ok ? "" : "OUT OF RANGE ",
+		hbas_dsp_safeload(HBAS_DSP_BIQUAD_BASE, words, HBAS_EQ_BANDS * 5, frames, len),
+		HBAS_EQ_BANDS * 5);
+}
+
+static const struct hbas_audio_backend log_backend = { NULL, log_apply, log_eq, log_user_eq };
 
 static void press_keys(const char *keys)
 {
@@ -170,13 +196,16 @@ static int snapshot(const char *prefix)
 		{ 22100, "R", "04-audio" },
 		{ 22200, "DERRR", "05-audio-bass-adjust" },        /* bass +3 steps */
 		{ 22300, "EDDDER", "06-audio-driver-headset" },    /* output -> headset, fade hides */
-		{ 22400, "ER", "07-tires" },
-		{ 22500, "R", "08-system" },
-		{ 22600, "B", "09-back-to-dash" },
+		{ 22400, "ER", "07-eq-flat" },
+		{ 22500, "DDD", "08-eq-preset-highway" },          /* Flat -> Bass -> Vocal -> Highway */
+		{ 22600, "ERRUUU", "09-eq-adjust-1k" },            /* 1 kHz band +3 -> Custom */
+		{ 22700, "ER", "10-tires" },
+		{ 22800, "R", "11-system" },
+		{ 22900, "B", "12-back-to-dash" },
 		/* same bike reporting itself as a trike: third tire appears */
-		{ 22700, "RR", "10-tires-trike" },
+		{ 23000, "RRR", "13-tires-trike" },
 		/* 2-speaker bike, back on speakers: no fade row */
-		{ 22800, "BRELLE", "11-audio-2-speakers" },
+		{ 23100, "BRELLE", "14-audio-2-speakers" },
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
 	char path[512];
@@ -188,9 +217,9 @@ static int snapshot(const char *prefix)
 	audio_log_quiet = true;
 	ui_set_audio_backend(&log_backend);
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
-		if (!strcmp(script[i].name, "10-tires-trike"))
+		if (!strcmp(script[i].name, "13-tires-trike"))
 			demo_set_trike(1);
-		if (!strcmp(script[i].name, "11-audio-2-speakers"))
+		if (!strcmp(script[i].name, "14-audio-2-speakers"))
 			ui_set_speaker_count(2);
 		run_to(script[i].t);
 		press_keys(script[i].keys);

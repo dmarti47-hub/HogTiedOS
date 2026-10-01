@@ -12,6 +12,8 @@ Both are built into the image by Buildroot (`buildroot-external/package/hogtied-
 
 ![Audio page](../docs/screenshots/ui-audio.png)
 
+![EQ page](../docs/screenshots/ui-eq.png)
+
 ## Running the screen on your PC
 
 One-time setup (Ubuntu / Debian / Pop!_OS):
@@ -31,9 +33,9 @@ right away. A window opens with the screen at 2x size, playing a demo ride.
 
 | Key | Does |
 |---|---|
-| Left / Right arrows | change page (Dash, Audio, Tires, System) |
-| Up / Down | on Audio: pick a setting |
-| Enter | on Audio: start / finish adjusting (Left/Right change the value) |
+| Left / Right arrows | change page (Dash, Audio, EQ, Tires, System) |
+| Up / Down | Audio: pick a setting. EQ: change preset (or a band's level while adjusting) |
+| Enter | start / finish adjusting (Audio: Left/Right change the value; EQ: Left/Right pick the band) |
 | Esc | back to Dash (or finish adjusting) |
 | close the window, or Ctrl+C in the terminal | quit |
 
