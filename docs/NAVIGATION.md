@@ -21,9 +21,30 @@ files (listed in the map's `db.json`). Needs libosmscout built in
 `libagg-dev libfreetype-dev libprotobuf-dev protobuf-compiler libmarisa-dev`
 (plus nlohmann_json, fetched into `build/prefix`).
 
-Measured (2026-10-01): Wisconsin, 280 MB download → **332 MB map**, 3 min
-20 s to convert; a 400×240 frame renders in ~0.1 s on the PC (the radio's
-Cortex-A8 is expected to be 10-20× slower: to be measured).
+Only HogTiedOS's minimal content is imported (`tools/maps/make_types.py`
+marks the rest of libosmscout's types IGNORE): drivable roads, ferries,
+water, borders, place names, addresses, fuel. No buildings, land use,
+paths, shops or transit. Harley's own maps are minimal too (greyscale
+roads, orange route).
+
+Measured (2026-10-01), Wisconsin (280 MB download):
+
+| Content | Map size | Convert time |
+|---|---|---|
+| libosmscout default | 332 MB | 3 min 20 s |
+| HogTiedOS minimal | **144 MB** | 1 min 34 s |
+
+Most of the minimal map is routing data (`router.dat`, 53 MB) and roads
+(`ways.dat`, 42 MB). Trade-off: house numbers that OSM stores on building
+outlines (common in the US) aren't searchable; street + town search is.
+
+**North America** (the chosen coverage) is about 60× Wisconsin's download,
+so roughly **6-9 GB** of map; converting it on a PC takes hours and ~100 GB
+of scratch space. Whether that fits next to Harley's maps depends on the
+eMMC's free space (unknown until the unit is up).
+
+A 400×240 frame renders in ~0.1 s on the PC (the radio's Cortex-A8 is
+expected to be 10-20× slower: to be measured).
 
 ## Stages
 

@@ -7,7 +7,8 @@
 # Downloads https://download.geofabrik.de/<GEOFABRIK_PATH>-latest.osm.pbf,
 # checks its md5, converts it with libosmscout's Import (built in
 # build/osmscout-pc), and keeps only the files the finished map uses (those
-# listed in its db.json), in build/maps/NAME. Map data (c) OpenStreetMap
+# listed in its db.json), in build/maps/NAME. Only the content HogTiedOS's
+# minimal map uses is imported (make_types.py). Map data (c) OpenStreetMap
 # contributors, ODbL.
 set -eu
 
@@ -16,12 +17,15 @@ NAME=$1
 SRC=$2
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 IMPORT="$ROOT/build/osmscout-pc/Import/Import"
-TYPES="$ROOT/build/libosmscout/stylesheets/map.ost"
+TYPES_DIR="$ROOT/build/maps/types"
+TYPES="$TYPES_DIR/map.ost"
 OUT="$ROOT/build/maps"
 PBF="$OUT/$NAME-latest.osm.pbf"
 URL="https://download.geofabrik.de/$SRC-latest.osm.pbf"
 
 [ -x "$IMPORT" ] || { echo "build libosmscout first (build/osmscout-pc)"; exit 1; }
+# our minimal content selection (tools/maps/make_types.py)
+python3 "$ROOT/tools/maps/make_types.py" "$ROOT/build/libosmscout/stylesheets" "$TYPES_DIR" >/dev/null
 mkdir -p "$OUT"
 if [ ! -f "$PBF" ]; then
     echo "Downloading $URL"
