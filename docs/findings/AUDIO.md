@@ -66,13 +66,15 @@ volume control, i.e. speed-sensitive volume) and a built-in fallback
 - `software/libhbas/audio.c`: settings model with the stock ranges and tables,
   per-output volume, fade only on 4-speaker bikes and only to speakers, and
   the stock EQ file naming (tested).
-- `hogtied-ui` Audio page: Volume, Bass, Treble, Fade, Output; the EQ profile
-  follows the engine-running flag from the bike.
-- `hogtied-ui` EQ page + `software/libhbas/eq.c`: a 5-band graphic EQ
-  (60 Hz, 250 Hz, 1 kHz, 4 kHz, 12 kHz, ±10 dB) with presets, made of RBJ
-  peaking biquads. They're encoded in the verified DSP format (sec. 6) and
-  packed into one safe-load of 25 words. Five EQ biquads plus the two stock
-  tone filters fill exactly one 7-biquad set.
+- `hogtied-ui` Audio page: Volume, Fade, Output; the factory EQ profile
+  follows the engine-running flag from the bike. **Bass/treble are dropped
+  on purpose**: the user EQ below replaces them.
+- `hogtied-ui` EQ page + `software/libhbas/eq.c`: a **7-band** graphic EQ
+  (63, 160, 400 Hz, 1, 2.5, 6.3, 16 kHz; ±10 dB; Q 1.05 for the ~1.33-octave
+  spacing) with presets, made of RBJ peaking biquads. They're encoded in the
+  verified DSP format (sec. 6) and packed into one 35-word safe-load. It's
+  the only tone control, and it **assumes all 7 biquads of the set stock's
+  bass/treble (`DSP_SET_TONE`, 0x907) write to are free** for it.
 - **Backend: logging only.** Every change produces the dB values a DSP backend
   would apply, but nothing is sent: the parameter-level writes behind
   0x906/0x907/0x913 aren't known yet.
@@ -101,9 +103,10 @@ points aren't. Record with timestamps, and note each HMI action as it's made.
 | 8 | Change source (media → phone → nav) | 0x90C, mixer writes | input gain / mixer |
 | 9 | Ride or replay speed changes | AVC-related writes | speed-sensitive volume curve |
 
-Items 2-5 are what the Audio page needs. For the EQ page, item 3 also
-answers which biquad slots carry tone and whether any are free for a user
-EQ, and the DSP sample rate (needed to compute coefficients) can be checked
+Items 2-5 are what the Audio page needs. For the EQ page, item 3 is the
+key check on the 7-free-slots assumption: it shows which of the 7 biquads
+stock's bass/treble actually rewrite, and whether the factory profile (0x905,
+tag 0x35 slot map) also puts filters there, and the DSP sample rate (needed to compute coefficients) can be checked
 by capturing a known bass/treble step and comparing its coefficients with
 the RBJ formulas at 44.1 vs 48 kHz. Static analysis of `audioCtrlSvc`'s
 `gain_services_*` and `fixed_tone_*` routines could recover some of it before

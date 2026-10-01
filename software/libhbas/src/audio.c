@@ -21,12 +21,6 @@ void hbas_audio_defaults(struct hbas_audio_settings *s)
 	memset(s, 0, sizeof(*s));
 	for (int i = 0; i < HBAS_OUT_COUNT; i++)
 		s->volume[i] = HBAS_VOL_DEFAULT;
-	/*
-	 * TODO: unconfirmed - which tone step is "flat". The stock bass/treble
-	 * curves map step N to N dB (0..16) and don't say which step the HMI
-	 * starts at; the middle step is used here.
-	 */
-	s->bass = s->treble = HBAS_TONE_STEPS / 2;
 	s->fade = HBAS_FADE_STEPS / 2;
 	s->output = HBAS_OUT_SPEAKERS;
 	s->speakers = 4;
@@ -35,12 +29,6 @@ void hbas_audio_defaults(struct hbas_audio_settings *s)
 int hbas_volume_step_db(unsigned step)
 {
 	return volume_curve[step < HBAS_VOL_STEPS ? step : HBAS_VOL_STEPS - 1];
-}
-
-int hbas_tone_step_db(unsigned step)
-{
-	/* bass_response_curve / treble_response_curve: step N -> N dB */
-	return (int)(step < HBAS_TONE_STEPS ? step : HBAS_TONE_STEPS - 1);
 }
 
 void hbas_fade_step_db(unsigned step, int *front_db, int *rear_db)
@@ -54,8 +42,6 @@ void hbas_fade_step_db(unsigned step, int *front_db, int *rear_db)
 void hbas_audio_to_db(const struct hbas_audio_settings *s, struct hbas_audio_db *out)
 {
 	out->volume_db = hbas_volume_step_db(s->volume[s->output]);
-	out->bass_db = hbas_tone_step_db(s->bass);
-	out->treble_db = hbas_tone_step_db(s->treble);
 	if (s->speakers == 4 && s->output == HBAS_OUT_SPEAKERS) {
 		hbas_fade_step_db(s->fade, &out->fade_front_db, &out->fade_rear_db);
 	} else {
@@ -81,8 +67,6 @@ bool hbas_audio_adjust(struct hbas_audio_settings *s, enum hbas_audio_item item,
 {
 	switch (item) {
 	case HBAS_AI_VOLUME: return step(&s->volume[s->output], delta, HBAS_VOL_STEPS - 1);
-	case HBAS_AI_BASS:   return step(&s->bass, delta, HBAS_TONE_STEPS - 1);
-	case HBAS_AI_TREBLE: return step(&s->treble, delta, HBAS_TONE_STEPS - 1);
 	case HBAS_AI_FADE:
 		return s->speakers == 4 && step(&s->fade, delta, HBAS_FADE_STEPS - 1);
 	case HBAS_AI_OUTPUT: {

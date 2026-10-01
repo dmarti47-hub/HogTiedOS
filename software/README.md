@@ -34,7 +34,7 @@ right away. A window opens with the screen at 2x size, playing a demo ride.
 | Key | Does |
 |---|---|
 | Left / Right arrows | change page (Dash, Audio, EQ, Tires, System) |
-| Up / Down | Audio: pick a setting. EQ: change preset (or a band's level while adjusting) |
+| Up / Down | Audio: pick a setting. EQ (7 bands, the only tone control): change preset, or a band's level while adjusting |
 | Enter | start / finish adjusting (Audio: Left/Right change the value; EQ: Left/Right pick the band) |
 | Esc | back to Dash (or finish adjusting) |
 | close the window, or Ctrl+C in the terminal | quit |

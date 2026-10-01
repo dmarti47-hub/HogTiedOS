@@ -16,7 +16,6 @@
 #include "hbas/eq.h"
 
 #define HBAS_VOL_STEPS   18   /* 0..17, step 0 = mute */
-#define HBAS_TONE_STEPS  17   /* 0..16 */
 #define HBAS_FADE_STEPS  17   /* 0..16, 8 = centre */
 #define HBAS_VOL_DEFAULT 5    /* audioMgr.cfg default_volumes */
 
@@ -28,7 +27,8 @@ enum hbas_audio_output {
 
 struct hbas_audio_settings {
 	uint8_t volume[HBAS_OUT_COUNT];   /* media volume step per output */
-	uint8_t bass, treble;             /* tone steps */
+	/* No bass/treble: tone is the 7-band user EQ (hbas/eq.h), which takes
+	 * over the biquad set stock uses for its bass/treble knobs. */
 	uint8_t fade;                     /* 0 = front only .. 8 centre .. 16 rear only */
 	enum hbas_audio_output output;    /* where media plays */
 	bool muted;
@@ -38,22 +38,19 @@ struct hbas_audio_settings {
 /* The dB values a backend applies, from the stock curves. */
 struct hbas_audio_db {
 	int volume_db;                    /* -100 = silent */
-	int bass_db, treble_db;
 	int fade_front_db, fade_rear_db;
 };
 
 void hbas_audio_defaults(struct hbas_audio_settings *s);
 
-/* Step tables (stock): volume_ctrl_step_curve, bass/treble/fade_response_curve */
+/* Step tables (stock): volume_ctrl_step_curve, fade_response_curve */
 int hbas_volume_step_db(unsigned step);
-int hbas_tone_step_db(unsigned step);
 void hbas_fade_step_db(unsigned step, int *front_db, int *rear_db);
 
 void hbas_audio_to_db(const struct hbas_audio_settings *s, struct hbas_audio_db *out);
 
 /* Adjust one setting by +/-1 step within its range; returns true if changed. */
-enum hbas_audio_item { HBAS_AI_VOLUME, HBAS_AI_BASS, HBAS_AI_TREBLE, HBAS_AI_FADE,
-		       HBAS_AI_OUTPUT, HBAS_AI_COUNT };
+enum hbas_audio_item { HBAS_AI_VOLUME, HBAS_AI_FADE, HBAS_AI_OUTPUT, HBAS_AI_COUNT };
 bool hbas_audio_adjust(struct hbas_audio_settings *s, enum hbas_audio_item item, int delta);
 
 /* What stock loads when the profile file is missing ("BUILT IN FLAT EQ"). */

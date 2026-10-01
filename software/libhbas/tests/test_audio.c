@@ -17,7 +17,6 @@ static void test_stock_curves(void)
 	CHECK(hbas_volume_step_db(5) == -18);        /* stock default step */
 	CHECK(hbas_volume_step_db(17) == 16);
 	CHECK(hbas_volume_step_db(99) == 16);        /* clamped */
-	CHECK(hbas_tone_step_db(0) == 0 && hbas_tone_step_db(16) == 16);
 	hbas_fade_step_db(8, &f, &r);
 	CHECK(f == 0 && r == 0);                     /* centre */
 	hbas_fade_step_db(0, &f, &r);
@@ -47,8 +46,8 @@ static void test_adjust_ranges(void)
 	CHECK(s.volume[HBAS_OUT_SPEAKERS] == 17);
 	CHECK(!hbas_audio_adjust(&s, HBAS_AI_VOLUME, +1));
 	for (int i = 0; i < 30; i++)
-		hbas_audio_adjust(&s, HBAS_AI_BASS, -1);
-	CHECK(s.bass == 0 && !hbas_audio_adjust(&s, HBAS_AI_BASS, -1));
+		hbas_audio_adjust(&s, HBAS_AI_VOLUME, -1);
+	CHECK(s.volume[HBAS_OUT_SPEAKERS] == 0 && !hbas_audio_adjust(&s, HBAS_AI_VOLUME, -1));
 	/* each output keeps its own volume */
 	CHECK(hbas_audio_adjust(&s, HBAS_AI_OUTPUT, +1) && s.output == HBAS_OUT_HEADSET_DRIVER);
 	CHECK(s.volume[HBAS_OUT_HEADSET_DRIVER] == 5);

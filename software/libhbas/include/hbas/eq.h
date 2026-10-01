@@ -4,10 +4,11 @@
  *
  * Verified (docs/findings/AUDIO.md sec. 6): coefficients are signed Q5.23,
  * the DSP stores the feedback terms negated, wire order is B2 B1 B0 A2 A1,
- * biquads sit at DSP address 222 + 5*i, up to 7 per set. Five EQ bands plus
- * the two stock tone controls fill exactly one set.
- * Open: DSP sample rate (48 kHz assumed) and which biquad slots the user EQ
- * may own.
+ * biquads sit at DSP address 222 + 5*i, up to 7 per set. The 7-band EQ fills
+ * that set, replacing stock's bass/treble (whose DSP_SET_TONE writes go to
+ * this bank).
+ * Open: DSP sample rate (48 kHz assumed); that all 7 slots are free for the
+ * user EQ is an assumption until the bench capture of stock bass/treble.
  */
 #ifndef HBAS_EQ_H
 #define HBAS_EQ_H
@@ -15,9 +16,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define HBAS_EQ_BANDS     5
+#define HBAS_EQ_BANDS     7
 #define HBAS_EQ_MAX_DB    10        /* slider range +/-10 dB, 1 dB steps */
-#define HBAS_EQ_Q         0.8       /* ~2 octaves wide: bands overlap smoothly */
+#define HBAS_EQ_Q         1.05      /* ~1.33 octaves wide, matching the band spacing */
 #define HBAS_DSP_FS       48000.0   /* TODO: unconfirmed - DSP sample rate */
 
 /* DSP layout (dsp_layout_map.json) */
@@ -27,7 +28,7 @@
 #define HBAS_DSP_SAFELOAD_BASE  3   /* table entry 0 */
 #define HBAS_DSP_SAFELOAD_MAX   60  /* words per safe-load */
 
-extern const uint16_t hbas_eq_band_hz[HBAS_EQ_BANDS];   /* 60 250 1k 4k 12k */
+extern const uint16_t hbas_eq_band_hz[HBAS_EQ_BANDS];   /* 63 .. 16k, 7-band ISO spacing */
 
 enum hbas_eq_preset { HBAS_EQ_FLAT, HBAS_EQ_BASS, HBAS_EQ_VOCAL, HBAS_EQ_HIGHWAY,
 		      HBAS_EQ_CUSTOM, HBAS_EQ_PRESET_COUNT };

@@ -34,10 +34,15 @@ static void test_eq_model(void)
 	for (double f = 20; f < 20000; f *= 1.5)
 		CHECK(fabs(hbas_eq_response_db(&eq, HBAS_DSP_FS, f)) < 1e-6);
 	hbas_eq_set_preset(&eq, HBAS_EQ_BASS);
-	CHECK(hbas_eq_response_db(&eq, HBAS_DSP_FS, 60) > 6.0);      /* 60 Hz band + overlap */
+	CHECK(hbas_eq_response_db(&eq, HBAS_DSP_FS, 63) > 6.0);      /* 63 Hz band + overlap */
 	CHECK(fabs(hbas_eq_response_db(&eq, HBAS_DSP_FS, 12000)) < 0.5);
+	/* a single band at full boost hits close to its gain at its own centre */
+	hbas_eq_set_preset(&eq, HBAS_EQ_FLAT);
+	eq.gain_db[3] = 10;
+	CHECK(NEAR(hbas_eq_response_db(&eq, HBAS_DSP_FS, 1000), 10.0, 0.01));
+	hbas_eq_set_preset(&eq, HBAS_EQ_BASS);
 	CHECK(eq.preset == HBAS_EQ_BASS);
-	CHECK(hbas_eq_adjust(&eq, 2, +1) && eq.gain_db[2] == 1 && eq.preset == HBAS_EQ_CUSTOM);
+	CHECK(hbas_eq_adjust(&eq, 3, +1) && eq.gain_db[3] == 1 && eq.preset == HBAS_EQ_CUSTOM);
 	for (int i = 0; i < 30; i++)
 		hbas_eq_adjust(&eq, 0, +1);
 	CHECK(eq.gain_db[0] == HBAS_EQ_MAX_DB && !hbas_eq_adjust(&eq, 0, +1));
@@ -59,6 +64,26 @@ static void test_dsp_words(void)
 	/* same structural relation every factory peaking filter has: B1 = -A1(stored) */
 	CHECK(w[1] == -w[4]);
 	CHECK(hbas_biquad_to_dsp(&huge, w) == -1);                    /* outside +/-16 */
+}
+
+static void test_full_eq_fits_one_safeload(void)
+{
+	/* all 7 bands at extreme settings stay encodable and fit one safe-load */
+	int32_t words[HBAS_EQ_BANDS * 5];
+	uint8_t f[3][3 + 4 * HBAS_DSP_SAFELOAD_MAX];
+	size_t len[3];
+
+	CHECK(HBAS_EQ_BANDS == HBAS_DSP_BIQUADS_PER_SET);
+	for (int g = -HBAS_EQ_MAX_DB; g <= HBAS_EQ_MAX_DB; g += HBAS_EQ_MAX_DB) {
+		for (int b = 0; b < HBAS_EQ_BANDS; b++) {
+			struct hbas_biquad bq;
+
+			hbas_biquad_peaking(&bq, HBAS_DSP_FS, hbas_eq_band_hz[b], g, HBAS_EQ_Q);
+			CHECK(hbas_biquad_to_dsp(&bq, &words[5 * b]) == 0);
+		}
+		CHECK(hbas_dsp_safeload(HBAS_DSP_BIQUAD_BASE, words, HBAS_EQ_BANDS * 5, f, len) == 3);
+		CHECK(len[0] == 3 + 4 * 35);
+	}
 }
 
 static void test_safeload_frames(void)
@@ -85,6 +110,7 @@ int main(void)
 	test_peaking_math();
 	test_eq_model();
 	test_dsp_words();
+	test_full_eq_fits_one_safeload();
 	test_safeload_frames();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);

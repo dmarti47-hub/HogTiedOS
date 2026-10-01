@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 /*
- * EQ page: 5-band graphic EQ (libhbas/eq) with a live response curve.
+ * EQ page: 7-band graphic EQ (libhbas/eq) with a live response curve. It is
+ * the only tone control: it takes the biquad set stock uses for bass/treble.
  *
  * Keys: Up/Down choose a preset. Enter starts adjusting: Left/Right pick a
  * band, Up/Down move its slider, Enter or Back finishes. While not adjusting,
@@ -60,7 +61,7 @@ static void refresh(void)
 
 void ui_eq_build(lv_obj_t *p)
 {
-	static const char *const names[HBAS_EQ_BANDS] = { "60", "250", "1k", "4k", "12k" };
+	static const char *const names[HBAS_EQ_BANDS] = { "63", "160", "400", "1k", "2.5k", "6.3k", "16k" };
 	lv_obj_t *zero;
 
 	hbas_eq_set_preset(&eq, HBAS_EQ_FLAT);
@@ -81,7 +82,7 @@ void ui_eq_build(lv_obj_t *p)
 	series = lv_chart_add_series(chart, COL_ACCENT, LV_CHART_AXIS_PRIMARY_Y);
 
 	for (int b = 0; b < HBAS_EQ_BANDS; b++) {
-		int x = 30 + b * 76;
+		int x = 16 + b * 54;
 
 		val[b] = ui_label(p, &lv_font_montserrat_14, COL_TEXT, "0");
 		lv_obj_set_pos(val[b], x, 108);
@@ -109,8 +110,8 @@ void ui_eq_build(lv_obj_t *p)
 	/* 0 dB reference line across the sliders */
 	zero = lv_obj_create(p);
 	lv_obj_remove_style_all(zero);
-	lv_obj_set_pos(zero, 30, 160);
-	lv_obj_set_size(zero, 4 * 76 + 40, 1);
+	lv_obj_set_pos(zero, 16, 160);
+	lv_obj_set_size(zero, (HBAS_EQ_BANDS - 1) * 54 + 40, 1);
 	lv_obj_set_style_bg_color(zero, COL_DIM, 0);
 	lv_obj_set_style_bg_opa(zero, LV_OPA_50, 0);
 	lv_obj_move_background(zero);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 /*
- * Audio page. Settings, ranges and step-to-dB curves are stock calibration
+ * Audio page: volume, fade, output. Tone is the 7-band EQ page (ui_eq.c),
+ * which replaces stock's bass/treble. Ranges and step-to-dB curves are stock calibration
  * (libhbas/audio, docs/findings/AUDIO.md). The factory EQ profile follows
  * the engine-running flag from the bike, as stock eqService does.
  *
@@ -16,7 +17,7 @@
 enum { ROW_H = 30, ROW_Y0 = 32 };
 
 static const char *const row_names[HBAS_AI_COUNT] = {
-	"Volume", "Bass", "Treble", "Fade", "Output",
+	"Volume", "Fade", "Output",          /* tone lives on the EQ page */
 };
 static const char *const output_names[HBAS_OUT_COUNT] = {
 	"Speakers", "Driver headset", "Passenger headset",
@@ -90,10 +91,6 @@ static void refresh(void)
 	else
 		lv_label_set_text_fmt(row_val[HBAS_AI_VOLUME], "%u  (%d dB)", audio.volume[audio.output],
 				      hbas_volume_step_db(audio.volume[audio.output]));
-	lv_bar_set_value(row_bar[HBAS_AI_BASS], audio.bass, LV_ANIM_OFF);
-	lv_label_set_text_fmt(row_val[HBAS_AI_BASS], "%d dB", hbas_tone_step_db(audio.bass));
-	lv_bar_set_value(row_bar[HBAS_AI_TREBLE], audio.treble, LV_ANIM_OFF);
-	lv_label_set_text_fmt(row_val[HBAS_AI_TREBLE], "%d dB", hbas_tone_step_db(audio.treble));
 	lv_bar_set_value(row_bar[HBAS_AI_FADE], (int)audio.fade - HBAS_FADE_STEPS / 2, LV_ANIM_OFF);
 	if (audio.fade == HBAS_FADE_STEPS / 2)
 		lv_label_set_text(row_val[HBAS_AI_FADE], "centre");
@@ -108,7 +105,7 @@ static void refresh(void)
 	else
 		hbas_eq_profile_name(eq, sizeof(eq), bike_cfg < 0 ? 0 : (unsigned)bike_cfg,
 				     engine_running, audio.output);
-	lv_label_set_text_fmt(lbl_eq, "EQ auto, engine %s: %s",
+	lv_label_set_text_fmt(lbl_eq, "Factory EQ, engine %s: %s",
 			      last_engine < 0 ? "?" : engine_running ? "on" : "off", eq);
 	lv_label_set_text(lbl_dsp, backend && backend->apply ? "DSP not mapped yet: settings logged only"
 					 : "DSP: no audio backend");
@@ -143,8 +140,6 @@ void ui_audio_build(lv_obj_t *p)
 {
 	hbas_audio_defaults(&audio);
 	make_row(p, HBAS_AI_VOLUME, false, 0, HBAS_VOL_STEPS - 1);
-	make_row(p, HBAS_AI_BASS, false, 0, HBAS_TONE_STEPS - 1);
-	make_row(p, HBAS_AI_TREBLE, false, 0, HBAS_TONE_STEPS - 1);
 	make_row(p, HBAS_AI_FADE, true, -(HBAS_FADE_STEPS / 2), HBAS_FADE_STEPS / 2);
 	make_row(p, HBAS_AI_OUTPUT, false, 0, 0);
 	lbl_eq = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");

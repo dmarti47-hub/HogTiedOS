@@ -130,9 +130,9 @@ static void log_apply(void *ctx, const struct hbas_audio_db *db, bool muted,
 {
 	(void)ctx;
 	if (!audio_log_quiet)
-		fprintf(stderr, "audio: out=%d vol=%d dB bass=%d dB treble=%d dB "
+		fprintf(stderr, "audio: out=%d vol=%d dB "
 			"fade front=%d rear=%d dB%s (not sent: DSP map unknown)\n",
-			out, db->volume_db, db->bass_db, db->treble_db,
+			out, db->volume_db,
 			db->fade_front_db, db->fade_rear_db, muted ? " MUTED" : "");
 }
 
@@ -161,10 +161,10 @@ static void log_user_eq(void *ctx, const struct hbas_eq *eq)
 	}
 	if (audio_log_quiet)
 		return;
-	fprintf(stderr, "audio: user EQ %s [%+d %+d %+d %+d %+d] dB -> %s%zu-frame safe-load "
-		"of %d words (not sent: DSP slot unknown)\n",
+	fprintf(stderr, "audio: EQ %s [%+d %+d %+d %+d %+d %+d %+d] dB -> %s%zu-frame safe-load "
+		"of %d words to biquads 0-6 (not sent: assumed slots, unconfirmed)\n",
 		hbas_eq_preset_name(eq->preset), eq->gain_db[0], eq->gain_db[1], eq->gain_db[2],
-		eq->gain_db[3], eq->gain_db[4], ok ? "" : "OUT OF RANGE ",
+		eq->gain_db[3], eq->gain_db[4], eq->gain_db[5], eq->gain_db[6], ok ? "" : "OUT OF RANGE ",
 		hbas_dsp_safeload(HBAS_DSP_BIQUAD_BASE, words, HBAS_EQ_BANDS * 5, frames, len),
 		HBAS_EQ_BANDS * 5);
 }
@@ -194,11 +194,11 @@ static int snapshot(const char *prefix)
 		{ 11000, "", "02-accelerating" },
 		{ 22000, "", "03-cruise-low-fuel" },
 		{ 22100, "R", "04-audio" },
-		{ 22200, "DERRR", "05-audio-bass-adjust" },        /* bass +3 steps */
-		{ 22300, "EDDDER", "06-audio-driver-headset" },    /* output -> headset, fade hides */
+		{ 22200, "DERRR", "05-audio-fade-adjust" },        /* fade 3 steps front */
+		{ 22300, "EDER", "06-audio-driver-headset" },      /* output -> headset, fade hides */
 		{ 22400, "ER", "07-eq-flat" },
 		{ 22500, "DDD", "08-eq-preset-highway" },          /* Flat -> Bass -> Vocal -> Highway */
-		{ 22600, "ERRUUU", "09-eq-adjust-1k" },            /* 1 kHz band +3 -> Custom */
+		{ 22600, "ERRRUUU", "09-eq-adjust-1k" },           /* 1 kHz band +3 -> Custom */
 		{ 22700, "ER", "10-tires" },
 		{ 22800, "R", "11-system" },
 		{ 22900, "B", "12-back-to-dash" },

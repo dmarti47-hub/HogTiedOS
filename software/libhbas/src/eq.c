@@ -8,15 +8,16 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-const uint16_t hbas_eq_band_hz[HBAS_EQ_BANDS] = { 60, 250, 1000, 4000, 12000 };
+const uint16_t hbas_eq_band_hz[HBAS_EQ_BANDS] = { 63, 160, 400, 1000, 2500, 6300, 16000 };
 
 /* Starting points; easy to retune once heard on the bike. */
 static const int8_t presets[HBAS_EQ_PRESET_COUNT][HBAS_EQ_BANDS] = {
-	[HBAS_EQ_FLAT]    = { 0, 0, 0, 0, 0 },
-	[HBAS_EQ_BASS]    = { 6, 3, 0, 0, 0 },
-	[HBAS_EQ_VOCAL]   = { -2, 0, 3, 3, 0 },
-	[HBAS_EQ_HIGHWAY] = { 3, -1, 2, 4, 3 },   /* lift over wind/engine noise */
-	[HBAS_EQ_CUSTOM]  = { 0, 0, 0, 0, 0 },
+	/*                   63 160 400 1k 2.5k 6.3k 16k */
+	[HBAS_EQ_FLAT]    = { 0,  0,  0, 0,  0,   0,  0 },
+	[HBAS_EQ_BASS]    = { 6,  4,  1, 0,  0,   0,  0 },
+	[HBAS_EQ_VOCAL]   = { -2, -1, 0, 2,  3,   1,  0 },
+	[HBAS_EQ_HIGHWAY] = { 3,  1, -1, 1,  3,   4,  3 },   /* lift over wind/engine noise */
+	[HBAS_EQ_CUSTOM]  = { 0,  0,  0, 0,  0,   0,  0 },
 };
 static const char *const preset_names[HBAS_EQ_PRESET_COUNT] = {
 	"Flat", "Bass", "Vocal", "Highway", "Custom",
