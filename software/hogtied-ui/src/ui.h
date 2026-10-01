@@ -23,6 +23,16 @@ void ui_set_audio_backend(const struct hbas_audio_backend *b);
 void ui_set_speaker_count(uint8_t speakers);   /* 2 or 4; fade needs 4 */
 void ui_set_bike_config(int cfg);               /* HD_Configuration_Options, -1 unknown */
 
+/*
+ * Settings the rider changes (audio and EQ pages), for saving across power
+ * cycles. ui_settings_set() restores them (call after ui_create); the stock
+ * speaker count and mute are not part of it. ui_settings_changes() goes up
+ * on every change the rider makes, so the caller knows when to save.
+ */
+void ui_settings_get(struct hbas_audio_settings *a, struct hbas_eq *eq);
+void ui_settings_set(const struct hbas_audio_settings *a, const struct hbas_eq *eq);
+unsigned ui_settings_changes(void);
+
 /* ---- shared between ui.c and ui_audio.c --------------------------------- */
 #include "lvgl.h"
 
@@ -44,10 +54,12 @@ void ui_audio_update(const struct hbas_vehicle *v);
 /* Returns true if the audio page consumed the key (e.g. while editing). */
 bool ui_audio_key(enum ui_key key);
 void ui_audio_eq_changed(void);             /* EQ moved: custom-system headroom */
+void ui_settings_touch(void);               /* the rider changed a setting */
 
 void ui_eq_build(lv_obj_t *page);
 void ui_eq_set_backend(const struct hbas_audio_backend *b);
 bool ui_eq_key(enum ui_key key);
 const struct hbas_eq *ui_eq_current(void);
+void ui_eq_set(const struct hbas_eq *eq);
 
 #endif

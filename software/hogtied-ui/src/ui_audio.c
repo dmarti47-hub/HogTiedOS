@@ -40,6 +40,7 @@ static int last_engine = -1;               /* -1 = no engine state yet */
 static bool engine_running;
 static int sel;
 static bool editing;
+static unsigned changes;
 
 static lv_obj_t *row[HBAS_AI_COUNT], *row_name[HBAS_AI_COUNT];
 static lv_obj_t *row_bar[HBAS_AI_COUNT], *row_val[HBAS_AI_COUNT];
@@ -208,6 +209,39 @@ void ui_audio_update(const struct hbas_vehicle *v)
 	}
 }
 
+void ui_settings_touch(void)
+{
+	changes++;
+}
+
+unsigned ui_settings_changes(void)
+{
+	return changes;
+}
+
+void ui_settings_get(struct hbas_audio_settings *a, struct hbas_eq *eq)
+{
+	*a = audio;
+	*eq = *ui_eq_current();
+}
+
+void ui_settings_set(const struct hbas_audio_settings *a, const struct hbas_eq *eq)
+{
+	/* the bike decides the speaker count; mute never survives a restart */
+	uint8_t speakers = audio.speakers;
+
+	audio = *a;
+	audio.speakers = speakers;
+	audio.muted = false;
+	editing = false;
+	if (!row_visible(sel))
+		sel = HBAS_AI_VOLUME;
+	ui_eq_set(eq);                          /* applies the EQ, then our volume */
+	load_eq();
+	apply();
+	refresh();
+}
+
 static void move_sel(int dir)
 {
 	int r = sel;
@@ -227,6 +261,7 @@ bool ui_audio_key(enum ui_key key)
 				apply();
 				if (sel == HBAS_AI_SYSTEM || sel == HBAS_AI_HEADSET)
 					load_eq();       /* factory profile depends on both */
+				ui_settings_touch();
 			}
 		} else if (key == UI_KEY_ENTER || key == UI_KEY_BACK) {
 			editing = false;

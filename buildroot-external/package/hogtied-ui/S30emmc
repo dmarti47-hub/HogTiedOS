@@ -1,0 +1,54 @@
+#!/bin/sh
+# Mount the eMMC's FAT32 partition (stock QNX hd0t12, /fs/mmc0) READ-ONLY at
+# /mnt/emmc. It holds the stock apps, nav and speech data; HogTiedOS never
+# changes those. hogtied-ui remounts it read-write only for the moment it
+# saves its own settings file (/mnt/emmc/hogtied/settings.conf), then puts
+# it straight back to read-only.
+#
+# mmc0 = MMC1 = the eMMC (omap3.dtsi alias), so it is mmcblk0.
+
+MNT=/mnt/emmc
+
+find_part() {
+	for p in /dev/mmcblk0p*; do
+		[ -b "$p" ] || continue
+		case "$(blkid "$p" 2>/dev/null)" in
+		*'TYPE="vfat"'*) echo "$p"; return 0 ;;
+		esac
+	done
+	return 1
+}
+
+case "$1" in
+start)
+	printf "Mounting eMMC read-only: "
+	# the eMMC can take a moment to enumerate after the driver probes
+	n=0
+	while ! part=$(find_part) && [ $n -lt 10 ]; do
+		sleep 0.5
+		n=$((n + 1))
+	done
+	if [ -z "$part" ]; then
+		echo "no FAT partition found (settings won't be saved)"
+		exit 0
+	fi
+	mkdir -p "$MNT"
+	if mount -t vfat -o ro,noatime "$part" "$MNT"; then
+		echo "$part OK"
+	else
+		echo "FAIL"
+	fi
+	;;
+stop)
+	printf "Unmounting eMMC: "
+	umount "$MNT" 2>/dev/null && echo OK || echo "not mounted"
+	;;
+restart)
+	"$0" stop
+	"$0" start
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+	;;
+esac

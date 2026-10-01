@@ -129,6 +129,14 @@ void ui_eq_build(lv_obj_t *p)
 	refresh();
 }
 
+void ui_eq_set(const struct hbas_eq *e)
+{
+	eq = *e;
+	editing = false;
+	apply();
+	refresh();
+}
+
 void ui_eq_set_backend(const struct hbas_audio_backend *b)
 {
 	backend = b;
@@ -164,8 +172,10 @@ bool ui_eq_key(enum ui_key key)
 		default: return false;          /* Left/Right/Back: page navigation */
 		}
 	}
-	if (changed)
+	if (changed) {
 		apply();
+		ui_settings_touch();
+	}
 	refresh();
 	return true;
 }

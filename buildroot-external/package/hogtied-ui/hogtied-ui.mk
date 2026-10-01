@@ -18,6 +18,8 @@ HOGTIED_UI_CONF_OPTS = \
 define HOGTIED_UI_INSTALL_INIT_SYSV
 	$(INSTALL) -D -m 0755 $(HOGTIED_UI_PKGDIR)/S90hogtied-ui \
 		$(TARGET_DIR)/etc/init.d/S90hogtied-ui
+	$(INSTALL) -D -m 0755 $(HOGTIED_UI_PKGDIR)/S30emmc \
+		$(TARGET_DIR)/etc/init.d/S30emmc
 endef
 
 $(eval $(cmake-package))

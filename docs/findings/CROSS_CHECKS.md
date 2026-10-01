@@ -410,3 +410,30 @@ emitting the single keys.
 
 btnCfg.xml also names 69 `E` rear push-to-talk and 187 VR push-to-talk, which
 these tables don't produce directly.
+
+## 14. eMMC (MMC1): pad voltage and bus width, from the IPL
+
+Needed to mount the eMMC's FAT32 partition for settings storage.
+
+- **The IPL powers the MMC1 pads at 1.8 V.** Running the stock IPL in
+  tools/ipl-emu and logging control-module writes shows
+  `CONTROL_PBIAS_LITE` (0x48002520) = **0x206**: bit 1 PBIASLITEPWRDNZ0 = 1
+  (MMC1 pads powered), bit 0 PBIASLITEVMODE0 = 0 (**1.8 V**), bit 2
+  SPEEDCTRL0 = 1, bit 9 PWRDNZ1 = 1. It also writes CONTROL_DEVCONF0
+  (0x48002274) = 0x0100005c (bit 24 = MMC1 clock from the internal loopback).
+- **Linux keeps exactly that.** The DTS pins `pbias_mmc_reg` to 1.8 V only,
+  always-on (otherwise the regulator core powers unused regulators off
+  ~30 s after boot), and removes `pbias-supply` from `&mmc1`, so the
+  omap_hsmmc driver never toggles it. No `vmmc-supply` is given: the eMMC's
+  supply is not known to be software-controlled, and without one the driver
+  doesn't touch power.
+- **Bus width 8 is inferred:** the IPL pad table muxes `mmc1_dat0..7` all to
+  mode 0, and stock `mmc.sh` has an alternate option line with `bw=8` (the
+  active driver line doesn't give a width). The Linux MMC core checks the
+  width by comparing EXT_CSD reads and drops to 4 or 1 bit if it fails.
+- **Layout:** stock automounts `hd0t12` (one FAT32-LBA partition) at
+  `/fs/mmc0`. Linux: `mmc0` alias = MMC1, so `/dev/mmcblk0p1` is expected.
+  `S30emmc` takes the first vfat partition on mmcblk0 and mounts it read-only
+  at /mnt/emmc.
+- **Still unknown:** the eMMC's maximum clock (the omap_hsmmc default is
+  used) and the eMMC's own supply rails. Not yet run on hardware.

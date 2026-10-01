@@ -39,6 +39,10 @@ right away. A window opens with the screen at 2x size, playing a demo ride.
 | Esc | back to Dash (or finish adjusting) |
 | close the window, or Ctrl+C in the terminal | quit |
 
+Your settings (volume, fade, output, headset, EQ) are remembered between
+runs in `~/.config/hogtied/settings.conf` (`--settings FILE` to use another
+file). It's plain text; delete it to go back to the defaults.
+
 Other data sources: `software/run-ui-on-pc.sh --replay FILE` (lines like
 `541#0BB803E800000300`, candump -L style) or `--can vcan0` (live Linux
 SocketCAN). **Never run `--demo` on a bike**: it shows fake data.
@@ -76,6 +80,17 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
   speakers/amp: factory EQ bypassed, volume tops out at 0 dB so the amp gets
   a clean signal). Headset routes media to the Harley comm headset jacks.
   `--speakers 2` simulates a 2-speaker stock bike (no fade).
+- **Settings are remembered** (`libhbas/settings.c`, `hogtied-ui/src/persist.c`):
+  a small text file, saved 2 s after the last change and on exit, written
+  atomically (temp file, fsync, rename), so a power cut leaves the old or
+  the new file, never a broken one. A damaged or unknown file falls back to
+  defaults key by key. Mute and the speaker count aren't saved. On the unit
+  the file is `/mnt/emmc/hogtied/settings.conf` on the eMMC's FAT32
+  partition, which `S30emmc` mounts **read-only**; the UI remounts it
+  read-write only for the few milliseconds of a save. Nothing outside the
+  `hogtied/` folder is ever written (the stock apps/nav/speech files there are
+  left alone). Written and tested on the PC (including the read-only remount,
+  in a mount namespace), not yet on hardware.
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.

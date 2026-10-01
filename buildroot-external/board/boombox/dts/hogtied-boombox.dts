@@ -247,6 +247,38 @@
 	bus-width = <1>;	/* TODO: unconfirmed - 1-bit until real width known */
 };
 
+/*
+ * [confirmed] eMMC on MMC1 (0x4809C000 IRQ 83): stock devb-mmcsd-omap3730teb,
+ * one FAT32 partition (QNX hd0t12) automounted at /fs/mmc0 with the stock
+ * apps, nav and speech data. HogTiedOS mounts it read-only and only writes
+ * its own settings folder (S30emmc, hogtied-ui --settings-mount).
+ *
+ * [inferred] 8-bit: the IPL pad table muxes mmc1_dat0..7 all to mode 0, and
+ * stock mmc.sh's alternate option line says bw=8. The MMC core verifies the
+ * width (ext_csd compare) and drops to 4/1-bit if it doesn't work.
+ *
+ * Pad voltage: [confirmed in ipl-emu] the IPL writes CONTROL_PBIAS_LITE
+ * (0x48002520) = 0x206, i.e. MMC1 pads powered (PWRDNZ0) at 1.8 V (VMODE0=0).
+ * Pin the pbias regulator to exactly that and keep it on, so Linux never
+ * switches the pads to 3.0 V or powers them down (the unused-regulator
+ * cleanup would otherwise turn it off 30 s after boot). No vmmc-supply: the
+ * card supply is not under software control as far as we know, and with
+ * none the driver leaves power alone.
+ */
+&pbias_mmc_reg {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-always-on;
+};
+
+&mmc1 {
+	status = "okay";
+	bus-width = <8>;
+	non-removable;
+	ti,non-removable;	/* omap_hsmmc: don't power-cycle at probe */
+	/delete-property/ pbias-supply;	/* pads stay as the IPL set them */
+};
+
 /* [confirmed] MMC2 0x480B4000 IRQ 86 is a disabled "secondary BT chip" slot
  * in stock firmware (commented out in bluetooth.sh). Keep off. */
 &mmc2 {

@@ -16,6 +16,12 @@
  *   --snapshot PREFIX offline: run the demo on a virtual clock and write
  *                     PREFIX-<name>.bmp screenshots, no display needed
  *
+ * Settings (volume, output, EQ, ...) are remembered:
+ *   --settings FILE   where to keep them; default on a PC window build:
+ *                     ~/.config/hogtied/settings.conf
+ *   --settings-mount DIR  FILE's filesystem stays read-only except while
+ *                     saving (the radio's eMMC, see S30emmc)
+ *
  * Keys: handlebar and front-panel buttons come from the "hbas-buttons" input
  * device (hbas-iocd). --stdin-keys also reads a/d (left/right), w/s
  * (up/down), Enter, q (back) from stdin, e.g. over the UART console.
@@ -41,6 +47,7 @@
 #include "lvgl.h"
 #include "hbas/vehicle.h"
 #include "demo.h"
+#include "persist.h"
 #include "ui.h"
 
 static struct hbas_vehicle vehicle;
@@ -429,8 +436,13 @@ static lv_display_t *create_display(const char *fbdev)
 }
 #endif
 
-static int run_live(const char *fbdev, bool demo, const char *replay, const char *can,
-		    bool stdin_keys, int speakers)
+struct live_opts {
+	const char *fbdev, *replay, *can, *settings, *settings_mount;
+	bool demo, stdin_keys;
+	int speakers;
+};
+
+static int run_live(const struct live_opts *o)
 {
 #if defined(HOGTIED_FBDEV) || defined(HOGTIED_SDL)
 	FILE *rf = NULL;
@@ -439,21 +451,23 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 	struct can_frame_lite frames[16];
 	char line[256];
 
-	if (replay && !(rf = fopen(replay, "r"))) {
-		perror(replay);
+	if (o->replay && !(rf = fopen(o->replay, "r"))) {
+		perror(o->replay);
 		return 1;
 	}
-	if (can && (cs = open_can(can)) < 0) {
-		fprintf(stderr, "cannot open CAN interface %s: %s\n", can, strerror(errno));
+	if (o->can && (cs = open_can(o->can)) < 0) {
+		fprintf(stderr, "cannot open CAN interface %s: %s\n", o->can, strerror(errno));
 		return 1;
 	}
-	if (stdin_keys)
+	if (o->stdin_keys)
 		fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
 	signal(SIGINT, on_stop_signal);
 	signal(SIGTERM, on_stop_signal);
-	create_display(fbdev);
-	ui_set_speaker_count(speakers);
+	create_display(o->fbdev);
+	ui_set_speaker_count(o->speakers);
 	ui_set_audio_backend(&log_backend);
+	if (o->settings)
+		persist_init(o->settings, o->settings_mount);
 	/* window closed -> display deleted; Ctrl+C / SIGTERM -> stop_requested */
 	while (!stop_requested && lv_display_get_default()) {
 		uint32_t now = tick_ms() - start;
@@ -466,7 +480,7 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 		if (buttons >= 0)
 			poll_buttons(buttons);
 
-		if (demo) {
+		if (o->demo) {
 			size_t n = demo_frames(now % 38000, frames, 16);
 
 			for (size_t i = 0; i < n; i++)
@@ -479,14 +493,16 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 		}
 		if (cs >= 0)
 			poll_can(cs);
-		if (stdin_keys)
+		if (o->stdin_keys)
 			poll_keys();
 		ui_update(&vehicle);
+		persist_poll(now);
 		usleep(lv_timer_handler() * 1000);
 	}
+	persist_flush();                        /* a change made just before exit */
 	return 0;
 #else
-	(void)fbdev; (void)demo; (void)replay; (void)can; (void)stdin_keys; (void)speakers;
+	(void)o;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
 	(void)open_buttons; (void)poll_buttons;
 	fprintf(stderr, "built without a display backend; use --snapshot\n");
@@ -496,31 +512,53 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 
 int main(int argc, char **argv)
 {
-	const char *fbdev = "/dev/fb0", *snap = NULL, *replay = NULL, *can = NULL;
-	bool demo = false, stdin_keys = false;
-	int speakers = 4;
+	struct live_opts o = { .fbdev = "/dev/fb0", .speakers = 4 };
+	const char *snap = NULL;
+	static char default_settings[512];
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--demo"))
-			demo = true;
+			o.demo = true;
 		else if (!strcmp(argv[i], "--speakers") && i + 1 < argc)
-			speakers = atoi(argv[++i]) == 2 ? 2 : 4;
+			o.speakers = atoi(argv[++i]) == 2 ? 2 : 4;
 		else if (!strcmp(argv[i], "--stdin-keys"))
-			stdin_keys = true;
+			o.stdin_keys = true;
 		else if (!strcmp(argv[i], "--fb") && i + 1 < argc)
-			fbdev = argv[++i];
+			o.fbdev = argv[++i];
 		else if (!strcmp(argv[i], "--snapshot") && i + 1 < argc)
 			snap = argv[++i];
 		else if (!strcmp(argv[i], "--replay") && i + 1 < argc)
-			replay = argv[++i];
+			o.replay = argv[++i];
 		else if (!strcmp(argv[i], "--can") && i + 1 < argc)
-			can = argv[++i];
+			o.can = argv[++i];
+		else if (!strcmp(argv[i], "--settings") && i + 1 < argc)
+			o.settings = argv[++i];
+		else if (!strcmp(argv[i], "--settings-mount") && i + 1 < argc)
+			o.settings_mount = argv[++i];
 		else {
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
-				"[--fb DEV] [--stdin-keys] [--speakers 2|4] | --snapshot PREFIX\n", argv[0]);
+				"[--fb DEV] [--stdin-keys] [--speakers 2|4]\n"
+				"       [--settings FILE [--settings-mount DIR]] | --snapshot PREFIX\n",
+				argv[0]);
 			return 2;
 		}
 	}
+#if defined(HOGTIED_SDL)
+	/* PC: remember settings in the usual per-user place */
+	if (!o.settings) {
+		const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
+
+		if (xdg && *xdg)
+			snprintf(default_settings, sizeof(default_settings), "%s/hogtied/settings.conf", xdg);
+		else if (home && *home)
+			snprintf(default_settings, sizeof(default_settings),
+				 "%s/.config/hogtied/settings.conf", home);
+		if (default_settings[0])
+			o.settings = default_settings;
+	}
+#else
+	(void)default_settings;
+#endif
 	hbas_vehicle_init(&vehicle);
 	use_virtual_clock = snap != NULL;
 #if defined(HOGTIED_SDL)
@@ -528,5 +566,5 @@ int main(int argc, char **argv)
 #endif
 	lv_init();
 	lv_tick_set_cb(tick_ms);
-	return snap ? snapshot(snap) : run_live(fbdev, demo, replay, can, stdin_keys, speakers);
+	return snap ? snapshot(snap) : run_live(&o);
 }
