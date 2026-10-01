@@ -53,9 +53,12 @@ static void load_eq(void)
 	char name[32];
 
 	if (bike_cfg < 0 && audio.output == HBAS_OUT_SPEAKERS)
-		return;                              /* can't pick a speaker profile yet */
-	hbas_eq_profile_name(name, sizeof(name), bike_cfg < 0 ? 0 : (unsigned)bike_cfg,
-			     engine_running, audio.output);
+		/* bike model unknown: stock falls back to its built-in flat EQ when
+		 * the profile file is missing (audioCtrlSvc setEq) */
+		snprintf(name, sizeof(name), "%s", HBAS_EQ_BUILTIN_FLAT);
+	else
+		hbas_eq_profile_name(name, sizeof(name), bike_cfg < 0 ? 0 : (unsigned)bike_cfg,
+				     engine_running, audio.output);
 	if (backend && backend->load_eq_profile)
 		backend->load_eq_profile(backend->ctx, name);
 }
@@ -101,7 +104,7 @@ static void refresh(void)
 	lv_label_set_text(row_val[HBAS_AI_OUTPUT], output_names[audio.output]);
 
 	if (audio.output == HBAS_OUT_SPEAKERS && bike_cfg < 0)
-		snprintf(eq, sizeof(eq), "bike model ?");
+		snprintf(eq, sizeof(eq), "flat (bike model ?)");
 	else
 		hbas_eq_profile_name(eq, sizeof(eq), bike_cfg < 0 ? 0 : (unsigned)bike_cfg,
 				     engine_running, audio.output);

@@ -54,6 +54,9 @@ enum hbas_audio_item { HBAS_AI_VOLUME, HBAS_AI_BASS, HBAS_AI_TREBLE, HBAS_AI_FAD
 		       HBAS_AI_OUTPUT, HBAS_AI_COUNT };
 bool hbas_audio_adjust(struct hbas_audio_settings *s, enum hbas_audio_item item, int delta);
 
+/* What stock loads when the profile file is missing ("BUILT IN FLAT EQ"). */
+#define HBAS_EQ_BUILTIN_FLAT "builtin-flat"
+
 /*
  * Factory EQ profile file the stock eqService would load (getSlotFilename):
  * "<bikecfg>_<ON|OFF>.bin" for speakers, "HS_<ON|OFF>.bin" for headsets.
