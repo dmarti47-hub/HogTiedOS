@@ -205,6 +205,8 @@ extern "C" bool hbas_map_to_pixel(const struct hbas_map *m, double lat, double l
 }
 
 
+static bool is_motorway(const std::string &t);
+
 // The route's manoeuvres, from libosmscout's description generator.
 namespace {
 using RD = osmscout::RouteDescription;
@@ -238,9 +240,10 @@ std::string road_name(const RD::NameDescriptionRef &n, bool prefer_ref = false)
 		return "";
 	std::string name = n->GetName(), ref = n->GetRef();
 
-	for (auto &c : ref)
-		if (c == ';')
-			c = '/';
+	for (auto *str : { &ref, &name })
+		for (auto &c : *str)
+			if (c == ';')
+				c = '/';
 	if (prefer_ref)
 		return !ref.empty() ? ref : name;
 	return !name.empty() ? name : ref;
@@ -274,6 +277,66 @@ struct steps_cb : osmscout::RouteDescriptionPostprocessor::Callback {
 	{
 		dist = node.GetDistance().AsMeter();
 		at = node.GetLocation();
+		motorway_number_change(node);
+	}
+
+	// libosmscout announces motorway forks, but a motorway that just
+	// changes number (I 794 becoming I 94 at an interchange) is "the same
+	// road" to it. Announce it when the new road shares no number with
+	// the one we were on; a number joining (I 94 -> I 39/I 90/I 94) is
+	// left silent. Nodes it already describes are left to it.
+	std::set<std::string> refs;            // current motorway's numbers
+	bool on_motorway = false;
+
+	static std::set<std::string> split_refs(const std::string &ref)
+	{
+		std::set<std::string> out;
+		size_t i = 0, j;
+
+		while (i <= ref.size()) {
+			j = ref.find(';', i);
+			if (j == std::string::npos)
+				j = ref.size();
+			if (j > i)
+				out.insert(ref.substr(i, j - i));
+			i = j + 1;
+		}
+		return out;
+	}
+
+	void motorway_number_change(const RD::Node &node)
+	{
+		auto type = node.GetDescription<RD::TypeNameDescription>();
+		auto name = node.GetDescription<RD::NameDescription>();
+
+		if (!type || !name)
+			return;
+		bool motorway = is_motorway(type->GetName()) || type->GetName() == "highway_trunk";
+		std::set<std::string> now = split_refs(name->GetRef());
+
+		if (!motorway) {
+			on_motorway = false;
+			refs.clear();
+			return;
+		}
+		if (now.empty())
+			return;                    // unnumbered piece: keep what we had
+		if (on_motorway && !refs.empty() &&
+		    std::none_of(now.begin(), now.end(), [&](const std::string &r) {
+			    return refs.count(r) != 0;
+		    }) &&
+		    !node.GetDescription<RD::MotorwayChangeDescription>() &&
+		    !node.GetDescription<RD::MotorwayLeaveDescription>() &&
+		    !node.GetDescription<RD::MotorwayEnterDescription>()) {
+			auto dir = node.GetDescription<RD::DirectionDescription>();
+			hbas_turn t = HBAS_TURN_STRAIGHT;
+
+			if (dir && dir->GetCurve() != RD::DirectionDescription::straightOn)
+				t = leftish(dir) ? HBAS_TURN_KEEP_LEFT : HBAS_TURN_KEEP_RIGHT;
+			add(t, road_name(name, true));
+		}
+		on_motorway = true;
+		refs = now;
 	}
 	void OnTargetReached(const RD::TargetDescriptionRef &) override
 	{
@@ -299,13 +362,35 @@ struct steps_cb : osmscout::RouteDescriptionPostprocessor::Callback {
 			     const RD::CrossingWaysDescriptionRef &) override
 	{
 		add(HBAS_TURN_MOTORWAY_ENTER, road_name(enter->GetToDescription(), true));
+		if (enter->GetToDescription()) {
+			refs = split_refs(enter->GetToDescription()->GetRef());
+			on_motorway = true;
+		}
 	}
 	void OnMotorwayChange(const RD::MotorwayChangeDescriptionRef &change,
 			      const RD::MotorwayJunctionDescriptionRef &,
 			      const RD::DirectionDescriptionRef &dir,
 			      const RD::DestinationDescriptionRef &) override
 	{
-		add(leftish(dir) ? HBAS_TURN_KEEP_LEFT : HBAS_TURN_KEEP_RIGHT,
+		auto from = change->GetFromDescription() ?
+			    split_refs(change->GetFromDescription()->GetRef()) : std::set<std::string>();
+		auto to = change->GetToDescription() ?
+			  split_refs(change->GetToDescription()->GetRef()) : std::set<std::string>();
+		// every number we were on carries on: only new ones joined
+		bool joined = !from.empty() &&
+			      std::all_of(from.begin(), from.end(),
+					  [&](const std::string &r) { return to.count(r) != 0; });
+		bool straight = !dir || dir->GetCurve() == RD::DirectionDescription::straightOn;
+
+		if (!to.empty()) {
+			refs = to;
+			on_motorway = true;
+		}
+		// a number joining the road we stay on: nothing to do
+		if (joined && straight)
+			return;
+		add(straight ? HBAS_TURN_STRAIGHT :
+			       leftish(dir) ? HBAS_TURN_KEEP_LEFT : HBAS_TURN_KEEP_RIGHT,
 		    road_name(change->GetToDescription(), true));
 	}
 	void OnMotorwayLeave(const RD::MotorwayLeaveDescriptionRef &,
@@ -316,8 +401,12 @@ struct steps_cb : osmscout::RouteDescriptionPostprocessor::Callback {
 		std::string to = road_name(name);
 
 		// unnamed ramp: say where it goes, as the signs do
-		if (to.empty() && dest)
+		if (to.empty() && dest) {
 			to = dest->GetDescription();
+			for (auto &c : to)
+				if (c == ';')
+					c = '/';
+		}
 		add(leftish(dir) ? HBAS_TURN_MOTORWAY_EXIT_LEFT : HBAS_TURN_MOTORWAY_EXIT_RIGHT, to);
 	}
 };

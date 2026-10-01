@@ -170,14 +170,23 @@ between motorways, exit left / right, arrive. Steps a few metres apart
 are merged. Motorways are named by number ("I 39/I 90/I 94"), other
 roads by name; an unnamed exit by its destination sign ("Merrimac").
 
+Motorway numbers are followed too. libosmscout announces forks, but a
+motorway that only changes number (I 794 becoming I 94 at the Marquette
+interchange) is the same road to it, so we announce it ourselves when the
+new road shares no number with the old one. A number only joining (I 94
+becoming I 39/I 90/I 94) is left silent, and a number leaving is
+announced ("Continue onto I 39" where I 39 splits off at Portage).
+libosmscout gives no side for these forks, so they say "Continue onto"
+rather than guessing keep left / right.
+
 Milwaukee to Devil's Lake, fastest:
 
 ```
   0.01 km  left           East Wisconsin Avenue
   0.22 km  right          North Jackson Street
   0.49 km  onto motorway  I 794
-116.11 km  keep right     I 39/I 90/I 94
-161.91 km  keep right     I 39
+  3.06 km  continue       I 94
+161.91 km  continue       I 39
 162.25 km  exit right     Merrimac
 176.68 km  right          County Road DL
 183.28 km  right          State Highway 113
@@ -192,11 +201,7 @@ following): an arrow for the manoeuvre, the distance to it, what to do
 left. Distances follow the bike's unit setting (libhbas
 `hbas_nav_distance`, unit tested: "400 ft", "0.3 mi", "450 m", "1.2 km").
 
-Known gap: libosmscout treats a motorway that changes number without a
-fork as one road, e.g. it doesn't announce the I 794 to I 94 interchange
-in Milwaukee; the panel shows the next manoeuvre it does know (here 115 km
-away). Possible fix: announce motorway ref changes ourselves from the
-route's way names. Voice prompts wait for the DSP audio link.
+Voice prompts wait for the DSP audio link.
 
 ![Map menu](screenshots/ui-map-menu.png)
 ![Route to Devil's Lake](screenshots/ui-map-route.png)
@@ -214,8 +219,9 @@ route's way names. Voice prompts wait for the DSP audio link.
 3. Routing: route line and options, saved places, on-screen keyboard,
    address search with autofill, managing places, automatic rerouting
    (done). Radio touchscreen: needs the hardware.
-4. Turn-by-turn: next-turn panel with distance (done); motorway number
-   changes; voice once the DSP audio link exists.
+4. Turn-by-turn: next-turn panel with distance, motorway number changes
+   (done); fork sides (needs lane data); voice once the DSP audio link
+   exists.
 5. On the radio: libosmscout + AGG + FreeType in the image, maps in
    `hogtied/maps/` on the eMMC next to (never replacing) Harley's, speed
    tuning.
