@@ -99,3 +99,23 @@ points aren't. Record with timestamps, and note each HMI action as it's made.
 Items 2-5 are what the Audio page needs. Static analysis of `audioCtrlSvc`'s
 `gain_services_*` and `fixed_tone_*` routines could recover some of it before
 any capture; the capture then confirms it.
+
+## 6. Biquad coefficient format, verified against all factory profiles
+
+Decoding every tag-0x36 biquad in the 183 shipped profiles (`eqtool.py`,
+Q5.23, file order A1 A2 B1 B0 B2) gives 1372 non-trivial filters:
+
+| Interpretation of stored A1/A2 | Stable | Median DC gain |
+|---|---|---|
+| **negated** (`a1 = -A1`, `a2 = -A2`, SigmaDSP convention) | **1372 / 1372** | **0.0 dB** |
+| as stored | 42 / 1372 | -62 dB |
+
+So the DSP stores the feedback coefficients negated. The factory filters
+also satisfy B1 = -A1 exactly, the RBJ peaking-EQ relation (b1 = a1), which
+independently confirms eqtool's field order. Wire order to the DSP is B2 B1 B0
+A2 A1 (`dsp_layout_map.json`, biquad bank = table index 4, first biquad at
+DSP address 222, stride 5, at most 7 per set).
+
+Still open: the DSP **sample rate** (coefficients depend on it; HogTiedOS
+assumes 48 kHz), and **which biquad slots** a user EQ can own without
+fighting the factory profile (tag 0x35 maps profile filters to slots).
