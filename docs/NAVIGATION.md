@@ -46,6 +46,14 @@ eMMC's free space (unknown until the unit is up).
 A 400×240 frame renders in ~0.1 s on the PC (the radio's Cortex-A8 is
 expected to be 10-20× slower: to be measured).
 
+## Map style
+
+`software/maps/hogtied.oss`: minimal, dark greyscale like Harley's maps
+(brighter and wider = more important road, slate water, sparse large
+labels); the route will be drawn in orange by the UI on top.
+
+![Milwaukee in the HogTiedOS style at three zooms](screenshots/map-style.png)
+
 ## Stages
 
 1. Map pipeline (done for one state).

@@ -1,0 +1,135 @@
+// HogTiedOS map style: minimal and greyscale like Harley's own maps, so the
+// orange route (drawn by the UI on top) is what stands out. Dark, to match
+// the rest of the screen; roads get brighter and wider the more important
+// they are; few labels, large enough to read at a glance.
+// Uses only the content tools/maps/make_types.py keeps.
+OSS
+
+ORDER WAYS
+  GROUP highway_motorway, highway_motorway_trunk
+  GROUP highway_motorway_primary, highway_trunk
+  GROUP highway_primary
+  GROUP highway_secondary
+  GROUP highway_tertiary
+  GROUP highway_motorway_link, highway_trunk_link, highway_primary_link,
+        highway_secondary_link, highway_tertiary_link
+  GROUP highway_unclassified, highway_road, highway_residential, highway_living_street
+  GROUP highway_service, route_ferry
+  GROUP boundary_country, boundary_state
+
+CONST
+  COLOR landColor        = #1b1c20;
+  COLOR waterColor       = #2a3038;
+  COLOR unknownColor     = #121316;
+  COLOR borderColor      = #4a4c54;
+
+  COLOR motorwayColor    = #e2e2e2;
+  COLOR trunkColor       = #cfcfcf;
+  COLOR primaryColor     = #b4b4b4;
+  COLOR secondaryColor   = #969696;
+  COLOR tertiaryColor    = #7c7c7c;
+  COLOR minorColor       = #5d5e64;
+  COLOR serviceColor     = #45464c;
+  COLOR casingColor      = #0e0f12;
+
+  COLOR labelColor       = #e6e6e6;
+  COLOR placeColor       = #f0f0f0;
+  COLOR shieldColor      = #3a3b40;
+
+SYMBOL fuel
+  CIRCLE 0,0 1.2 {
+    AREA {color: #9a9a9a; }
+  }
+
+STYLE
+  // ground
+  [MAG 0-] {
+    [TYPE _tile_sea] AREA {color: @waterColor;}
+    [TYPE _tile_land] AREA {color: @landColor;}
+    [TYPE _tile_unknown] AREA {color: @unknownColor;}
+    [TYPE natural_water, natural_bay, natural_strait, landuse_reservoir, landuse_basin,
+          waterway_riverbank, waterway_dock] AREA {color: @waterColor;}
+  }
+  [MAG region-] {
+    [TYPE waterway_river, waterway_canal] WAY {color: @waterColor; displayWidth: 0.4mm; width: 10m;}
+  }
+
+  // borders
+  [MAG continent-] {
+    [TYPE boundary_country] WAY {color: @borderColor; displayWidth: 0.4mm; dash: 6,3;}
+  }
+  [MAG stateOver-] {
+    [TYPE boundary_state] WAY {color: @borderColor; displayWidth: 0.25mm; dash: 4,3;}
+  }
+
+  // roads: dark casing under a grey fill, brighter = more important
+  [MAG continent-] {
+    [TYPE highway_motorway, highway_motorway_trunk] {
+      WAY#outline {color: @casingColor; displayWidth: 0.9mm; width: 26m; priority: -1;}
+      WAY {color: @motorwayColor; displayWidth: 0.6mm; width: 20m;}
+    }
+  }
+  [MAG state-] {
+    [TYPE highway_trunk, highway_motorway_primary] {
+      WAY#outline {color: @casingColor; displayWidth: 0.8mm; width: 22m; priority: -1;}
+      WAY {color: @trunkColor; displayWidth: 0.5mm; width: 17m;}
+    }
+  }
+  [MAG county-] {
+    [TYPE highway_primary] {
+      WAY#outline {color: @casingColor; displayWidth: 0.7mm; width: 20m; priority: -1;}
+      WAY {color: @primaryColor; displayWidth: 0.45mm; width: 15m;}
+    }
+  }
+  [MAG region-] {
+    [TYPE highway_secondary] WAY {color: @secondaryColor; displayWidth: 0.4mm; width: 13m;}
+  }
+  [MAG cityOver-] {
+    [TYPE highway_tertiary] WAY {color: @tertiaryColor; displayWidth: 0.35mm; width: 11m;}
+    [TYPE highway_motorway_link, highway_trunk_link, highway_primary_link,
+          highway_secondary_link, highway_tertiary_link]
+      WAY {color: @tertiaryColor; displayWidth: 0.3mm; width: 8m;}
+  }
+  [MAG suburb-] {
+    [TYPE highway_unclassified, highway_road, highway_residential, highway_living_street]
+      WAY {color: @minorColor; displayWidth: 0.3mm; width: 8m;}
+    [TYPE route_ferry] WAY {color: @minorColor; displayWidth: 0.25mm; dash: 3,2;}
+  }
+  [MAG close-] {
+    [TYPE highway_service] WAY {color: @serviceColor; displayWidth: 0.2mm; width: 5m;}
+    [TYPE amenity_fuel] {
+      NODE.ICON {symbol: fuel;}
+      AREA.ICON {symbol: fuel;}
+    }
+  }
+
+  // route numbers on the big roads, names on the rest when zoomed in
+  [MAG state-] {
+    [TYPE highway_motorway, highway_motorway_trunk, highway_trunk]
+      WAY.SHIELD {label: Ref.name; color: @labelColor; backgroundColor: @shieldColor;
+                  borderColor: @labelColor; priority: 5;}
+  }
+  [MAG city-] {
+    [TYPE highway_primary, highway_secondary]
+      WAY.TEXT {label: Name.name; color: @labelColor; size: 1.0; priority: 8;}
+  }
+  [MAG detail-] {
+    [TYPE highway_tertiary, highway_unclassified, highway_residential, highway_road]
+      WAY.TEXT {label: Name.name; color: @labelColor; size: 0.9; priority: 10;}
+  }
+
+  // places
+  [TYPE place_millioncity, place_bigcity MAG stateOver-]
+    NODE.TEXT {label: Name.name; color: @placeColor; style: emphasize; emphasizeColor: @landColor;
+               size: 1.3; priority: 1;}
+  [TYPE place_city MAG county-]
+    NODE.TEXT {label: Name.name; color: @placeColor; style: emphasize; emphasizeColor: @landColor;
+               size: 1.15; priority: 2;}
+  [TYPE place_town MAG region-]
+    NODE.TEXT {label: Name.name; color: @placeColor; style: emphasize; emphasizeColor: @landColor;
+               size: 1.0; priority: 3;}
+  [TYPE place_village MAG cityOver-]
+    NODE.TEXT {label: Name.name; color: @labelColor; size: 0.9; priority: 4;}
+  [TYPE place_suburb MAG suburb-]
+    NODE.TEXT {label: Name.name; color: @labelColor; size: 0.9; priority: 6;}
+END
