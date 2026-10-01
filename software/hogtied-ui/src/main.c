@@ -21,6 +21,9 @@
  * (--bike-file PATH to use another file), or --bike N to simulate one on a
  * PC (N = HD_Configuration_Options byte 0, e.g. 2 = OE FLTR).
  *
+ * Phone music (Media page): hbas-btd's socket, /run/hbas/bt.sock, or
+ * --bt-socket PATH (PC window build default: $XDG_RUNTIME_DIR/hbas-bt.sock).
+ *
  * Settings (volume, output, EQ, ...) are remembered:
  *   --settings FILE   where to keep them; default on a PC window build:
  *                     ~/.config/hogtied/settings.conf
@@ -48,6 +51,7 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 
 #include "lvgl.h"
 #include "hbas/dsp.h"
@@ -73,6 +77,84 @@ static uint32_t tick_ms(void)
 static void feed(const struct can_frame_lite *f)
 {
 	hbas_vehicle_decode(&vehicle, f->id, f->data, f->len);
+}
+
+/* ---- hbas-btd client (Media page) ---------------------------------------- */
+
+static struct hbas_bt_state bt_state;
+static int bt_fd = -1;
+static char bt_in[HBAS_BT_LINE_MAX];
+static size_t bt_len;
+
+static void bt_send(const char *line)
+{
+	if (bt_fd >= 0 && send(bt_fd, line, strlen(line), MSG_NOSIGNAL) < 0)
+		fprintf(stderr, "bt: send failed: %s\n", strerror(errno));
+}
+
+static void bt_feed_line(const char *line)
+{
+	struct hbas_bt_msg m;
+
+	if (!hbas_bt_parse(line, &m) && hbas_bt_apply(&bt_state, &m))
+		ui_media_update(&bt_state);
+}
+
+static void bt_disconnected(void)
+{
+	if (bt_fd >= 0)
+		close(bt_fd);
+	bt_fd = -1;
+	bt_len = 0;
+	hbas_bt_state_init(&bt_state);          /* daemon = false */
+	ui_media_update(&bt_state);
+}
+
+static void bt_connect(const char *path)
+{
+	struct sockaddr_un a = { .sun_family = AF_UNIX };
+	int s;
+
+	if (strlen(path) >= sizeof(a.sun_path))
+		return;
+	strcpy(a.sun_path, path);
+	s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (s < 0)
+		return;
+	if (connect(s, (struct sockaddr *)&a, sizeof(a))) {
+		close(s);
+		return;
+	}
+	fcntl(s, F_SETFL, O_NONBLOCK);
+	bt_fd = s;
+	bt_state.daemon = true;
+	ui_media_update(&bt_state);
+}
+
+static void bt_poll(void)
+{
+	char *nl;
+	ssize_t r;
+
+	while (bt_fd >= 0 && (r = recv(bt_fd, bt_in + bt_len, sizeof(bt_in) - 1 - bt_len, 0)) != 0) {
+		if (r < 0) {
+			if (errno != EAGAIN && errno != EWOULDBLOCK)
+				bt_disconnected();
+			return;
+		}
+		bt_len += (size_t)r;
+		bt_in[bt_len] = '\0';
+		while ((nl = strchr(bt_in, '\n'))) {
+			*nl = '\0';
+			bt_feed_line(bt_in);
+			bt_len -= (size_t)(nl + 1 - bt_in);
+			memmove(bt_in, nl + 1, bt_len + 1);
+		}
+		if (bt_len >= sizeof(bt_in) - 1)
+			bt_len = 0;
+	}
+	if (bt_fd >= 0 && r == 0)
+		bt_disconnected();                  /* daemon went away */
 }
 
 /* ---- offline snapshot backend ------------------------------------------ */
@@ -213,6 +295,7 @@ static int snapshot(const char *prefix)
 		{ 500, "", "01-key-on" },
 		{ 11000, "", "02-accelerating" },
 		{ 22000, "", "03-cruise-low-fuel" },
+		{ 22050, "R", "03b-media" },                       /* demo phone playing */
 		{ 22100, "R", "04-audio" },
 		{ 22200, "DERRR", "05-audio-fade-adjust" },        /* fade 3 steps front */
 		{ 22300, "EDER", "06-audio-custom-system" },       /* output -> custom system */
@@ -225,9 +308,9 @@ static int snapshot(const char *prefix)
 		{ 22800, "R", "11-system" },
 		{ 22900, "B", "12-back-to-dash" },
 		/* same bike reporting itself as a trike: third tire appears */
-		{ 23000, "RRR", "13-tires-trike" },
+		{ 23000, "RRRR", "13-tires-trike" },
 		/* 2-speaker bike, back on speakers: no fade row */
-		{ 23100, "BRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
+		{ 23100, "BRRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
 		{ 23150, "DERE", "14b-audio-speed-volume" },       /* speed volume on at demo speed */
 		{ 23200, "RD", "15-eq-harley-speakers" },          /* EQ page, Custom -> Harley */
 	};
@@ -241,6 +324,12 @@ static int snapshot(const char *prefix)
 	audio_log_quiet = true;
 	ui_set_audio_backend(&log_backend);
 	ui_set_bike(2);                         /* demo bike: OE FLTR, as the IOC would report */
+	/* demo phone, as hbas-btd would report it */
+	bt_state.daemon = true;
+	bt_feed_line("bt powered=1 pairable=0 connected=1 name=\"Rider's Phone\" player=1");
+	bt_feed_line("track title=\"Born to Be Wild\" artist=Steppenwolf album=Steppenwolf "
+		     "duration=210000");
+	bt_feed_line("play status=playing position=64000");
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
 		if (!strcmp(script[i].name, "13-tires-trike"))
 			demo_set_trike(1);
@@ -454,7 +543,7 @@ static lv_display_t *create_display(const char *fbdev)
 #endif
 
 struct live_opts {
-	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file;
+	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file, *bt_socket;
 	bool demo, stdin_keys;
 	int speakers, bike;
 };
@@ -481,6 +570,7 @@ static int run_live(const struct live_opts *o)
 	FILE *rf = NULL;
 	int cs = -1, buttons = -1;
 	uint32_t start = tick_ms(), next_replay = 0, next_button_scan = 0, next_bike_check = 0;
+	uint32_t next_bt_connect = 0;
 	int bike = -1;
 	struct can_frame_lite frames[16];
 	char line[256];
@@ -500,6 +590,7 @@ static int run_live(const struct live_opts *o)
 	create_display(o->fbdev);
 	ui_set_speaker_count(o->speakers);
 	ui_set_audio_backend(&log_backend);
+	ui_media_set_sender(bt_send);
 	if (o->bike >= 0)
 		ui_set_bike(bike = o->bike);
 	if (o->settings)
@@ -515,6 +606,13 @@ static int run_live(const struct live_opts *o)
 		}
 		if (buttons >= 0)
 			poll_buttons(buttons);
+		/* hbas-btd may start after us, or restart */
+		if (bt_fd < 0 && o->bt_socket && now >= next_bt_connect) {
+			bt_connect(o->bt_socket);
+			next_bt_connect = now + 2000;
+		}
+		bt_poll();
+		ui_media_tick();
 		/* the IOC sends the bike configuration once, at startup */
 		if (o->bike < 0 && now >= next_bike_check) {
 			int cfg = read_bike_file(o->bike_file);
@@ -550,7 +648,8 @@ static int run_live(const struct live_opts *o)
 #else
 	(void)o;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
-	(void)open_buttons; (void)poll_buttons; (void)read_bike_file;
+	(void)open_buttons; (void)poll_buttons; (void)read_bike_file; (void)bt_connect;
+	(void)bt_poll; (void)bt_send;
 	fprintf(stderr, "built without a display backend; use --snapshot\n");
 	return 1;
 #endif
@@ -559,7 +658,8 @@ static int run_live(const struct live_opts *o)
 int main(int argc, char **argv)
 {
 	struct live_opts o = { .fbdev = "/dev/fb0", .speakers = 4, .bike = -1,
-				.bike_file = "/run/hbas/bike" };
+				.bike_file = "/run/hbas/bike", .bt_socket = "/run/hbas/bt.sock" };
+	static char default_bt[256];
 	const char *snap = NULL;
 	static char default_settings[512];
 
@@ -580,6 +680,8 @@ int main(int argc, char **argv)
 			o.can = argv[++i];
 		else if (!strcmp(argv[i], "--bike") && i + 1 < argc)
 			o.bike = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--bt-socket") && i + 1 < argc)
+			o.bt_socket = argv[++i];
 		else if (!strcmp(argv[i], "--bike-file") && i + 1 < argc)
 			o.bike_file = argv[++i];
 		else if (!strcmp(argv[i], "--settings") && i + 1 < argc)
@@ -589,12 +691,18 @@ int main(int argc, char **argv)
 		else {
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
 				"[--fb DEV] [--stdin-keys] [--speakers 2|4] [--bike N | --bike-file F]\n"
+				"       [--bt-socket PATH]\n"
 				"       [--settings FILE [--settings-mount DIR]] | --snapshot PREFIX\n",
 				argv[0]);
 			return 2;
 		}
 	}
 #if defined(HOGTIED_SDL)
+	/* PC: hbas-btd runs as the user, its socket lives in the runtime dir */
+	if (!strcmp(o.bt_socket, "/run/hbas/bt.sock") && getenv("XDG_RUNTIME_DIR")) {
+		snprintf(default_bt, sizeof(default_bt), "%s/hbas-bt.sock", getenv("XDG_RUNTIME_DIR"));
+		o.bt_socket = default_bt;
+	}
 	/* PC: remember settings in the usual per-user place */
 	if (!o.settings) {
 		const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
@@ -609,6 +717,7 @@ int main(int argc, char **argv)
 	}
 #else
 	(void)default_settings;
+	(void)default_bt;
 #endif
 	hbas_vehicle_init(&vehicle);
 	use_virtual_clock = snap != NULL;

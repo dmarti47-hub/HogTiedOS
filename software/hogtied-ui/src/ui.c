@@ -213,11 +213,13 @@ void ui_create(void)
 	lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
 	pages[UI_PAGE_DASH] = page_create(scr, "HOGTIED");
+	pages[UI_PAGE_MEDIA] = page_create(scr, "MEDIA");
 	pages[UI_PAGE_AUDIO] = page_create(scr, "AUDIO");
 	pages[UI_PAGE_EQ] = page_create(scr, "EQ");
 	pages[UI_PAGE_TIRES] = page_create(scr, "TIRES");
 	pages[UI_PAGE_SYSTEM] = page_create(scr, "SYSTEM");
 	build_dash(pages[UI_PAGE_DASH]);
+	ui_media_build(pages[UI_PAGE_MEDIA]);
 	ui_audio_build(pages[UI_PAGE_AUDIO]);
 	ui_eq_build(pages[UI_PAGE_EQ]);
 	build_tires(pages[UI_PAGE_TIRES]);
@@ -229,7 +231,7 @@ void ui_create(void)
 		lv_obj_set_size(dots[i], 6, 6);
 		lv_obj_set_style_radius(dots[i], LV_RADIUS_CIRCLE, 0);
 		lv_obj_set_style_bg_opa(dots[i], LV_OPA_COVER, 0);
-		lv_obj_align(dots[i], LV_ALIGN_TOP_MID, i * 12 - (UI_PAGE_COUNT - 1) * 6, 12);
+		lv_obj_align(dots[i], LV_ALIGN_TOP_MID, i * 10 - (UI_PAGE_COUNT - 1) * 5 - 10, 12);
 	}
 	show_page(UI_PAGE_DASH);
 }
@@ -334,6 +336,10 @@ void ui_set_bike(int cfg)
 
 void ui_key(enum ui_key key)
 {
+	if (ui_media_pairing_key(key))
+		return;
+	if (page == UI_PAGE_MEDIA && ui_media_key(key))
+		return;
 	if (page == UI_PAGE_AUDIO && ui_audio_key(key))
 		return;
 	if (page == UI_PAGE_EQ && ui_eq_key(key))

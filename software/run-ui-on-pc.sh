@@ -6,6 +6,10 @@
 #   software/run-ui-on-pc.sh --can vcan0
 #   software/run-ui-on-pc.sh --replay my-ride.log
 #
+# Phone music: pair your phone with this PC as usual (its own Bluetooth
+# settings); the Media page then shows the track and its buttons control the
+# phone. hbas-btd is started alongside (only if libdbus-1-dev is installed).
+#
 # Keys: Left/Right change pages, Up/Down, Enter selects, Esc goes back.
 # Close the window or press Ctrl+C in the terminal to quit.
 # Nothing here touches the head unit.
@@ -44,10 +48,26 @@ cmake -S "$ROOT/software/hogtied-ui" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release \
       -DLVGL_DIR="$LVGL_DIR" -DHOGTIED_SDL=ON >/dev/null
 cmake --build "$BUILD" -j"$(nproc)"
 
+# Bluetooth media daemon: optional on a PC (needs libdbus-1-dev)
+BTD=""
+if pkg-config --exists dbus-1; then
+    cmake -S "$ROOT/software/btd" -B "$ROOT/build/btd-pc" -DCMAKE_BUILD_TYPE=Release >/dev/null
+    cmake --build "$ROOT/build/btd-pc" -j"$(nproc)"
+    BTD="$ROOT/build/btd-pc/hbas-btd"
+else
+    echo "(Media page: install libdbus-1-dev to control your phone's music from here)"
+fi
+
 # no data source given: play the demo ride (as an OE FLTR unless --bike is set)
 case " $* " in
 *" --demo "*|*" --replay "*|*" --can "*) ;;
 *) case " $* " in *" --bike "*) set -- --demo "$@" ;; *) set -- --demo --bike 2 "$@" ;; esac ;;
 esac
+if [ -n "$BTD" ]; then
+    # no --agent: the PC's own Bluetooth settings handle pairing
+    "$BTD" --socket "${XDG_RUNTIME_DIR:-/tmp}/hbas-bt.sock" &
+    btd_pid=$!
+    trap 'kill $btd_pid 2>/dev/null' EXIT INT TERM
+fi
 echo "Starting hogtied-ui $*  (Left/Right: pages, Esc: back, close window to quit)"
-exec "$BUILD/hogtied-ui" "$@"
+"$BUILD/hogtied-ui" --bt-socket "${XDG_RUNTIME_DIR:-/tmp}/hbas-bt.sock" "$@"

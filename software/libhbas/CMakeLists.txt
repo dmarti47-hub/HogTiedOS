@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)          # tests use statement expressions
 
 add_library(hbas STATIC src/vehicle.c src/ioc.c src/buttons.c src/audio.c src/eq.c src/settings.c
-  src/dsp.c src/harley_eq_table.c src/bike.c)
+  src/dsp.c src/harley_eq_table.c src/bike.c src/btproto.c)
 target_include_directories(hbas PUBLIC include)
 target_link_libraries(hbas PUBLIC m)
 target_compile_options(hbas PRIVATE -Wall -Wextra -Werror)
@@ -41,6 +41,10 @@ if(HBAS_TESTS)
   target_link_libraries(test_dsp hbas)
   target_compile_options(test_dsp PRIVATE -Wall -Wextra -Werror)
   add_test(NAME dsp COMMAND test_dsp)
+  add_executable(test_btproto tests/test_btproto.c)
+  target_link_libraries(test_btproto hbas)
+  target_compile_options(test_btproto PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME btproto COMMAND test_btproto)
 endif()
 
 install(TARGETS hbas ARCHIVE DESTINATION lib)
