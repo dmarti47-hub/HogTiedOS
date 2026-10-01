@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "hbas/audio.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -35,6 +36,44 @@ enum hbas_audio_output hbas_audio_output(const struct hbas_audio_settings *s)
 	case HBAS_HS_PASSENGER: return HBAS_OUT_HEADSET_PASSENGER;
 	default: return HBAS_OUT_SPEAKERS;
 	}
+}
+
+/*
+ * Stock speed-volume curves (AUDIO.md sec. 7.6): output-gain multipliers
+ * (2048 = 1.0) at index breakpoints, linear between them, as computed by
+ * stock gain_services from factory profile tag 0x62 (02_ON.bin rows 0 and 4;
+ * the same rows in every profile that has them).
+ */
+static const struct { uint8_t at[5]; uint16_t gain[5]; } speed_curve[2] = {
+	{ { 0, 20, 50, 75, 100 }, { 2048, 5140, 5754, 6470, 6470 } },   /* speakers */
+	{ { 0, 25, 50, 75, 100 }, { 2048, 2416, 2558, 2742, 2784 } },   /* headsets */
+};
+#define SPEED_INDEX_PER_KPH 0.25        /* stock AVC level 2 */
+
+double hbas_speed_boost_db(bool headset, unsigned kph_x10)
+{
+	const typeof(speed_curve[0]) *c = &speed_curve[headset];
+	double v = floor(kph_x10 / 10.0 * SPEED_INDEX_PER_KPH + 0.5), g = c->gain[4];
+
+	for (int i = 0; i < 4; i++) {
+		if (v <= c->at[i + 1]) {
+			g = c->gain[i] + (c->gain[i + 1] - c->gain[i]) * (v - c->at[i]) /
+					 (c->at[i + 1] - c->at[i]);
+			break;
+		}
+	}
+	return 20.0 * log10(g / 2048.0);
+}
+
+bool hbas_speed_boost_update(struct hbas_audio_settings *s, bool have_speed, unsigned kph_x10)
+{
+	double want = s->speed_volume && have_speed
+		      ? hbas_speed_boost_db(hbas_audio_output(s) != HBAS_OUT_SPEAKERS, kph_x10) : 0.0;
+	int8_t now = s->speed_boost_db;
+
+	if (fabs(want - now) > 0.75 || (want == 0.0 && now != 0))
+		s->speed_boost_db = (int8_t)lround(want);
+	return s->speed_boost_db != now;
 }
 
 int hbas_volume_step_db(unsigned step)
@@ -86,9 +125,20 @@ void hbas_audio_to_db(const struct hbas_audio_settings *s, const struct hbas_eq 
 
 	out->volume_db = hbas_volume_step_db_sys(s->volume[o], custom_spk ? HBAS_SYS_CUSTOM
 									    : HBAS_SYS_STOCK);
-	/* custom system: keep EQ boosts from pushing the signal past 0 dB */
-	if (custom_spk && out->volume_db > -100)
-		out->volume_db -= eq_max_boost(eq);
+	if (out->volume_db > -100) {
+		if (s->speed_volume)
+			out->volume_db += s->speed_boost_db;
+		/* custom system: keep EQ boosts and speed from pushing past 0 dB */
+		if (custom_spk) {
+			int ceiling = -eq_max_boost(eq);
+
+			out->volume_db -= eq_max_boost(eq);
+			if (out->volume_db > ceiling)
+				out->volume_db = ceiling;
+		}
+		if (out->volume_db > 24)            /* DSP limit (AUDIO.md sec. 7.1) */
+			out->volume_db = 24;
+	}
 	if (hbas_audio_fade_available(s))
 		hbas_fade_step_db(s->fade, &out->fade_front_db, &out->fade_rear_db);
 	else
@@ -139,6 +189,11 @@ bool hbas_audio_adjust(struct hbas_audio_settings *s, enum hbas_audio_item item,
 		s->headset = (enum hbas_headset)v;
 		return c;
 	}
+	case HBAS_AI_SPEED_VOLUME:
+		if (s->speed_volume == (delta > 0))
+			return false;
+		s->speed_volume = delta > 0;
+		return true;
 	default:
 		return false;
 	}

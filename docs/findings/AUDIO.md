@@ -231,6 +231,30 @@ stock radio. **Flat** stays the default. Configurations with no factory
 profile (e.g. 136-139, which ship only a `.conf`) give flat, as stock falls
 back to flat. Not reproduced: the speed-dependent boost (slot 6).
 
+### 7.6 Speed volume (stock "AVC")
+
+- **Input.** `processSpeedEvent(speed)` gets the vehicle speed as an integer
+  (from the speed property; vehicleCAN.lua's `Speed_Vehicle_ECM` is km/h,
+  so km/h is inferred) and computes `index = floor(speed × factor + 0.5)`.
+  The factor is the HMI AVC level (`setAVC`, handler at 0x1093ac): 0 off,
+  1 → 0.1, 2 → 0.25, 3 → 0.5, 4 → 1.0.
+- **Curve.** `gain_services` (0x128fa8 loads, 0x12a214 evaluates) turns the
+  index into an output-gain multiplier per channel (2048 = 1.0), linear
+  between 5 breakpoints, from factory profile **tag 0x62**: 10 rows of 34
+  bytes (4 slopes, 4 intercepts, 5 breakpoints), one per output channel.
+  Running 0x12a214 in Unicorn on `02_ON.bin`:
+  - speakers (rows 0-3): 1.0 / 2.51 / 2.81 / 3.16 / 3.16 at index
+    0 / 20 / 50 / 75 / 100, i.e. 0, +8.0, +9.0, +10.0, +10.0 dB;
+  - headsets (rows 4-9): 0, +1.4, +1.9, +2.5, +2.7 dB at 0 / 25 / 50 / 75 / 100.
+- **Which bikes.** Only the factory FLHT/FLTX/FLTR profiles with the engine
+  on (`00`-`03_ON`) carry the speaker curve; every other profile has a flat
+  speaker row and the headset curve (254/255: flat everywhere).
+- **HogTiedOS** offers it as an on/off **Speed volume** setting (off by
+  default) on every bike: those two curves at stock level 2 (factor 0.25), so
+  about +5.5 dB at 50 km/h and +8 dB at 110 km/h on speakers. It's added to
+  the volume in whole dB with 0.75 dB of hysteresis, never to mute, and the
+  Custom system keeps its 0 dB ceiling.
+
 ### 7.4 Still unknown after this pass
 
 - The DSP's initial state after power-up and how its program is provided

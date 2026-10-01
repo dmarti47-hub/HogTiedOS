@@ -30,6 +30,7 @@ static void test_roundtrip(void)
 	a.fade = 11;
 	a.system = HBAS_SYS_CUSTOM;
 	a.headset = HBAS_HS_DRIVER;
+	a.speed_volume = true;
 	hbas_eq_set_preset(&e, HBAS_EQ_HIGHWAY);
 	hbas_eq_adjust(&e, 0, -7);                 /* -> custom */
 	CHECK(hbas_settings_format(&a, &e, buf, sizeof(buf)) > 0);
@@ -37,6 +38,7 @@ static void test_roundtrip(void)
 	CHECK(hbas_settings_parse(buf, &b, &f) > 0);
 	CHECK(!memcmp(b.volume, a.volume, sizeof(a.volume)));
 	CHECK(b.fade == 11 && b.system == HBAS_SYS_CUSTOM && b.headset == HBAS_HS_DRIVER);
+	CHECK(b.speed_volume);
 	CHECK(f.preset == HBAS_EQ_CUSTOM && !memcmp(f.gain_db, e.gain_db, sizeof(e.gain_db)));
 	/* buffer too small is an error, not a truncated file */
 	CHECK(hbas_settings_format(&a, &e, buf, 40) == -1);

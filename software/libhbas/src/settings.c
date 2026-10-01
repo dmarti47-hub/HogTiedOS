@@ -39,6 +39,7 @@ int hbas_settings_format(const struct hbas_audio_settings *a, const struct hbas_
 	PUT("fade=%u\n", a->fade);
 	PUT("output=%s\n", system_keys[a->system < HBAS_SYS_COUNT ? a->system : 0]);
 	PUT("headset=%s\n", headset_keys[a->headset < HBAS_HS_COUNT ? a->headset : 0]);
+	PUT("speed_volume=%s\n", a->speed_volume ? "on" : "off");
 	PUT("eq.preset=%s\n", preset_keys[eq->preset < HBAS_EQ_PRESET_COUNT ? eq->preset : 0]);
 	PUT("eq.gains=");
 	for (int i = 0; i < HBAS_EQ_BANDS; i++)
@@ -142,6 +143,11 @@ int hbas_settings_parse(const char *text, struct hbas_audio_settings *a, struct 
 		} else if (!strcmp(key, "headset")) {
 			if ((i = lookup(val, headset_keys, HBAS_HS_COUNT)) >= 0) {
 				na.headset = (enum hbas_headset)i;
+				applied++;
+			}
+		} else if (!strcmp(key, "speed_volume")) {
+			if (!strcmp(val, "on") || !strcmp(val, "off")) {
+				na.speed_volume = val[1] == 'n';
 				applied++;
 			}
 		} else if (!strcmp(key, "eq.preset")) {

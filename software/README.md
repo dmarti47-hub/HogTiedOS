@@ -88,6 +88,8 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
   (Harley's factory EQ and volume curve) or **Custom system** (aftermarket
   speakers/amp: factory EQ bypassed, volume tops out at 0 dB so the amp gets
   a clean signal). Headset routes media to the Harley comm headset jacks.
+  **Speed volume** (on/off) raises the volume with road speed on Harley's
+  own curve.
   `--speakers 2` simulates a 2-speaker stock bike (no fade).
 - **Settings are remembered** (`libhbas/settings.c`, `hogtied-ui/src/persist.c`):
   a small text file, saved 2 s after the last change and on exit, written

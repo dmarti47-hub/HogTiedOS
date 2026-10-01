@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "hbas/audio.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -144,6 +145,56 @@ static void test_factory_eq_choice(void)
 	CHECK(!strcmp(b, "128_OFF.bin"));            /* 3-digit configs exist */
 }
 
+static void test_speed_volume(void)
+{
+	struct hbas_audio_settings s;
+	struct hbas_audio_db db;
+	struct hbas_eq eq;
+
+	/* the stock curve itself: 0 at standstill, ~+8 dB at highway speed */
+	CHECK(fabs(hbas_speed_boost_db(false, 0)) < 0.01);
+	CHECK(fabs(hbas_speed_boost_db(false, 1100) - 8.2) < 0.2);     /* 110 km/h */
+	CHECK(fabs(hbas_speed_boost_db(false, 4000) - 10.0) < 0.1);    /* tops out */
+	CHECK(hbas_speed_boost_db(true, 1100) < 2.0);                  /* headsets: gentle */
+
+	hbas_audio_defaults(&s);
+	CHECK(!s.speed_volume);                                        /* off by default */
+	CHECK(!hbas_speed_boost_update(&s, true, 1100) && s.speed_boost_db == 0);
+	CHECK(hbas_audio_adjust(&s, HBAS_AI_SPEED_VOLUME, +1) && s.speed_volume);
+	CHECK(!hbas_audio_adjust(&s, HBAS_AI_SPEED_VOLUME, +1));
+	CHECK(hbas_speed_boost_update(&s, true, 1100) && s.speed_boost_db == 8);
+	hbas_audio_to_db(&s, NULL, &db);
+	CHECK(db.volume_db == -18 + 8);
+	/* hysteresis: a small speed wobble doesn't change the step */
+	CHECK(!hbas_speed_boost_update(&s, true, 1060) && !hbas_speed_boost_update(&s, true, 1140));
+	/* speed unknown: no boost */
+	CHECK(hbas_speed_boost_update(&s, false, 0) && s.speed_boost_db == 0);
+	/* mute stays mute */
+	hbas_speed_boost_update(&s, true, 1100);
+	s.volume[HBAS_OUT_SPEAKERS] = 0;
+	hbas_audio_to_db(&s, NULL, &db);
+	CHECK(db.volume_db == -100);
+	/* custom system: the boost never takes it past 0 dB (minus EQ headroom) */
+	s.system = HBAS_SYS_CUSTOM;
+	s.volume[HBAS_OUT_SPEAKERS] = 17;
+	hbas_eq_set_preset(&eq, HBAS_EQ_FLAT);
+	hbas_audio_to_db(&s, &eq, &db);
+	CHECK(db.volume_db == 0);
+	eq.gain_db[0] = 4;
+	hbas_audio_to_db(&s, &eq, &db);
+	CHECK(db.volume_db == -4);
+	s.volume[HBAS_OUT_SPEAKERS] = 8;               /* well below the top: full boost */
+	hbas_eq_set_preset(&eq, HBAS_EQ_FLAT);
+	hbas_audio_to_db(&s, &eq, &db);
+	CHECK(db.volume_db == hbas_volume_step_db_sys(8, HBAS_SYS_CUSTOM) + 8);
+	s.volume[HBAS_OUT_SPEAKERS] = 12;              /* near the top: capped at 0 dB */
+	hbas_audio_to_db(&s, &eq, &db);
+	CHECK(db.volume_db == 0);
+	/* turning it off removes the boost */
+	hbas_audio_adjust(&s, HBAS_AI_SPEED_VOLUME, -1);
+	CHECK(hbas_speed_boost_update(&s, true, 1100) && s.speed_boost_db == 0);
+}
+
 int main(void)
 {
 	test_stock_curves();
@@ -153,6 +204,7 @@ int main(void)
 	test_adjust_ranges();
 	test_fade_availability();
 	test_factory_eq_choice();
+	test_speed_volume();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return EXIT_FAILURE;

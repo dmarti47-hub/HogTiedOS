@@ -11,6 +11,8 @@
  *    0 dB and drops by the largest EQ boost, so the amp gets a clean signal.
  * Headset: the Harley comm system's wired helmet jacks; media plays there
  * when one is selected (it has its own volume and the headset EQ profile).
+ * Speed volume: raises the volume with road speed on Harley's own curve
+ * (libhbas hbas_speed_boost_db); off by default.
  *
  * Keys: Up/Down pick a row; Enter starts adjusting it, Left/Right change the
  * value, Enter or Back finishes. While not adjusting, Left/Right still switch
@@ -24,7 +26,7 @@
 enum { ROW_H = 30, ROW_Y0 = 32 };
 
 static const char *const row_names[HBAS_AI_COUNT] = {
-	"Volume", "Fade", "Output", "Headset",
+	"Volume", "Fade", "Output", "Headset", "Speed volume",
 };
 static const char *const system_names[HBAS_SYS_COUNT] = {
 	"Stock speakers", "Custom system",
@@ -37,6 +39,8 @@ static struct hbas_audio_settings audio;
 static const struct hbas_audio_backend *backend;
 static int bike_cfg = -1;
 static int last_engine = -1;               /* -1 = no engine state yet */
+static bool have_speed;
+static unsigned speed_kph_x10;
 static bool engine_running;
 static int sel;
 static bool editing;
@@ -121,6 +125,13 @@ static void refresh(void)
 		lv_label_set_text_fmt(row_val[HBAS_AI_FADE], "front %d", audio.fade - HBAS_FADE_STEPS / 2);
 	lv_label_set_text(row_val[HBAS_AI_SYSTEM], system_names[audio.system]);
 	lv_label_set_text(row_val[HBAS_AI_HEADSET], headset_names[audio.headset]);
+	if (!audio.speed_volume)
+		lv_label_set_text(row_val[HBAS_AI_SPEED_VOLUME], "Off");
+	else if (!have_speed)
+		lv_label_set_text(row_val[HBAS_AI_SPEED_VOLUME], "On  (no speed yet)");
+	else
+		lv_label_set_text_fmt(row_val[HBAS_AI_SPEED_VOLUME], "On  (+%d dB now)",
+				      audio.speed_boost_db);
 
 	hbas_audio_factory_eq(eq, sizeof(eq), &audio, bike_cfg, engine_running);
 	if (!strcmp(eq, HBAS_EQ_BUILTIN_FLAT))
@@ -164,6 +175,7 @@ void ui_audio_build(lv_obj_t *p)
 	make_row(p, HBAS_AI_FADE, true, -(HBAS_FADE_STEPS / 2), HBAS_FADE_STEPS / 2);
 	make_row(p, HBAS_AI_SYSTEM, false, 0, 0);
 	make_row(p, HBAS_AI_HEADSET, false, 0, 0);
+	make_row(p, HBAS_AI_SPEED_VOLUME, false, 0, 0);
 	lbl_eq = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
 	lv_obj_set_pos(lbl_eq, 12, 196);
 	lbl_dsp = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
@@ -209,6 +221,22 @@ void ui_audio_eq_changed(void)
 void ui_audio_update(const struct hbas_vehicle *v)
 {
 	int eng = (v->seen & HBAS_SEEN_ENG3) ? v->engine_running : -1;
+	unsigned kph;
+	bool have = hbas_speed_kph_x10(v, &kph);
+
+	/* speed volume: Harley's curve, whole-dB steps with hysteresis */
+	if (have != have_speed || kph != speed_kph_x10) {
+		bool shown = have != have_speed;
+
+		have_speed = have;
+		speed_kph_x10 = have ? kph : 0;
+		if (hbas_speed_boost_update(&audio, have_speed, speed_kph_x10)) {
+			apply();
+			shown = true;
+		}
+		if (shown)
+			refresh();
+	}
 
 	if (eng != last_engine) {
 		/* stock switches between the *_OFF and *_ON EQ files with the engine */
@@ -244,6 +272,8 @@ void ui_settings_set(const struct hbas_audio_settings *a, const struct hbas_eq *
 	audio = *a;
 	audio.speakers = speakers;
 	audio.muted = false;
+	audio.speed_boost_db = 0;
+	hbas_speed_boost_update(&audio, have_speed, speed_kph_x10);
 	editing = false;
 	if (!row_visible(sel))
 		sel = HBAS_AI_VOLUME;
@@ -272,6 +302,9 @@ bool ui_audio_key(enum ui_key key)
 				apply();
 				if (sel == HBAS_AI_SYSTEM || sel == HBAS_AI_HEADSET)
 					load_eq();       /* factory profile depends on both */
+				/* headsets have their own, gentler speed curve */
+				if (hbas_speed_boost_update(&audio, have_speed, speed_kph_x10))
+					apply();
 				ui_settings_touch();
 			}
 		} else if (key == UI_KEY_ENTER || key == UI_KEY_BACK) {

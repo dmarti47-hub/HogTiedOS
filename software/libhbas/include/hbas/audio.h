@@ -44,8 +44,10 @@ struct hbas_audio_settings {
 	uint8_t fade;                     /* 0 = rear only .. 8 centre .. 16 front only */
 	enum hbas_speaker_system system;
 	enum hbas_headset headset;
+	bool speed_volume;                /* raise the volume with road speed */
 	bool muted;
 	uint8_t speakers;                 /* stock speaker count, 2 or 4 (bike model) */
+	int8_t speed_boost_db;            /* current speed boost (hbas_speed_boost_update) */
 	/* No bass/treble: tone is the 7-band user EQ (hbas/eq.h). */
 };
 
@@ -68,13 +70,31 @@ void hbas_fade_step_db(unsigned step, int *front_db, int *rear_db);
 /* Whether the fade control applies with these settings. */
 bool hbas_audio_fade_available(const struct hbas_audio_settings *s);
 
-/* eq may be NULL; in CUSTOM mode its largest boost is taken off the volume. */
+/*
+ * Speed volume (stock "AVC", AUDIO.md sec. 7.6): Harley's curves from the
+ * factory profiles (tag 0x62) at stock AVC level 2: index = km/h x 0.25,
+ * gain linear between breakpoints. Speakers reach about +8 dB at highway
+ * speed (+10 dB max), headsets +2.7 dB max.
+ */
+double hbas_speed_boost_db(bool headset, unsigned kph_x10);
+/*
+ * Recompute s->speed_boost_db for the current speed (have_speed false =
+ * unknown: no boost). Whole dB, with 0.75 dB of hysteresis so a steady speed
+ * doesn't flip between steps. Returns true if it changed.
+ */
+bool hbas_speed_boost_update(struct hbas_audio_settings *s, bool have_speed, unsigned kph_x10);
+
+/*
+ * eq may be NULL; in CUSTOM mode its largest boost is taken off the volume.
+ * The speed boost is added to the volume (never to mute); CUSTOM still never
+ * goes past 0 dB after EQ headroom.
+ */
 void hbas_audio_to_db(const struct hbas_audio_settings *s, const struct hbas_eq *eq,
 		      struct hbas_audio_db *out);
 
 /* Adjust one setting by +/-1 step within its range; returns true if changed. */
 enum hbas_audio_item { HBAS_AI_VOLUME, HBAS_AI_FADE, HBAS_AI_SYSTEM, HBAS_AI_HEADSET,
-		       HBAS_AI_COUNT };
+		       HBAS_AI_SPEED_VOLUME, HBAS_AI_COUNT };
 bool hbas_audio_adjust(struct hbas_audio_settings *s, enum hbas_audio_item item, int delta);
 
 /* What stock loads when the profile file is missing ("BUILT IN FLAT EQ"). */

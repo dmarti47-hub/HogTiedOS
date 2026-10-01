@@ -9,6 +9,7 @@
  *   fade=8
  *   output=stock|custom
  *   headset=off|driver|passenger
+ *   speed_volume=on|off
  *   eq.preset=flat|harley|bass|vocal|highway|custom
  *   eq.gains=+3,+1,-1,+1,+3,+4,+3
  *

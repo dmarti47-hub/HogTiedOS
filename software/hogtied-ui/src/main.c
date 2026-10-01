@@ -228,6 +228,7 @@ static int snapshot(const char *prefix)
 		{ 23000, "RRR", "13-tires-trike" },
 		/* 2-speaker bike, back on speakers: no fade row */
 		{ 23100, "BRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
+		{ 23150, "DERE", "14b-audio-speed-volume" },       /* speed volume on at demo speed */
 		{ 23200, "RD", "15-eq-harley-speakers" },          /* EQ page, Custom -> Harley */
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
