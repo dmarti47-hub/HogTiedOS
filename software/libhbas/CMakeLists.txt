@@ -4,7 +4,7 @@ project(libhbas C)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)          # tests use statement expressions
 
-add_library(hbas STATIC src/vehicle.c)
+add_library(hbas STATIC src/vehicle.c src/ioc.c)
 target_include_directories(hbas PUBLIC include)
 target_compile_options(hbas PRIVATE -Wall -Wextra -Werror)
 
@@ -15,6 +15,10 @@ if(HBAS_TESTS)
   target_link_libraries(test_vehicle hbas)
   target_compile_options(test_vehicle PRIVATE -Wall -Wextra -Werror)
   add_test(NAME vehicle COMMAND test_vehicle)
+  add_executable(test_ioc tests/test_ioc.c)
+  target_link_libraries(test_ioc hbas)
+  target_compile_options(test_ioc PRIVATE -Wall -Wextra -Werror)
+  add_test(NAME ioc COMMAND test_ioc)
 endif()
 
 install(TARGETS hbas ARCHIVE DESTINATION lib)
