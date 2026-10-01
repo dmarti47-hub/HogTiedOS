@@ -74,15 +74,21 @@ static void apply(void)
 		backend->apply(backend->ctx, &db, audio.muted, hbas_audio_output(&audio));
 }
 
+static char loaded_eq[32];                 /* profile the backend has now */
+
 static void load_eq(void)
 {
 	char name[32];
 
 	/* custom system or unknown bike model: built-in flat EQ, as stock falls
-	 * back to when a profile file is missing (audioCtrlSvc setEq) */
+	 * back to when a profile file is missing (audioCtrlSvc setEq). Only
+	 * load when it changes: e.g. on a custom system the engine starting
+	 * and stopping doesn't change anything. */
 	hbas_audio_factory_eq(name, sizeof(name), &audio, bike_cfg, engine_running);
-	if (backend && backend->load_eq_profile)
+	if (backend && backend->load_eq_profile && strcmp(name, loaded_eq)) {
 		backend->load_eq_profile(backend->ctx, name);
+		snprintf(loaded_eq, sizeof(loaded_eq), "%s", name);
+	}
 	eq_context();                           /* and bike/engine */
 }
 
@@ -188,6 +194,7 @@ void ui_audio_build(lv_obj_t *p)
 void ui_set_audio_backend(const struct hbas_audio_backend *b)
 {
 	backend = b;
+	loaded_eq[0] = '\0';                  /* a new backend has nothing loaded */
 	ui_eq_set_backend(b);
 	apply();
 	refresh();
