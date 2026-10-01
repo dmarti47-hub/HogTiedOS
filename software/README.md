@@ -71,7 +71,11 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
 - **Audio: settings only, nothing reaches the DSP yet.** The Audio page uses
   the stock ranges and step-to-dB tables, and the EQ profile follows the
   engine; changes are logged. Which DSP writes they become is what the bench
-  capture is for (`docs/findings/AUDIO.md`). `--speakers 2` hides fade.
+  capture is for (`docs/findings/AUDIO.md`). Output chooses **Stock speakers**
+  (Harley's factory EQ and volume curve) or **Custom system** (aftermarket
+  speakers/amp: factory EQ bypassed, volume tops out at 0 dB so the amp gets
+  a clean signal). Headset routes media to the Harley comm headset jacks.
+  `--speakers 2` simulates a 2-speaker stock bike (no fade).
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.

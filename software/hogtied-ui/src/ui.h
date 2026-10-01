@@ -43,9 +43,11 @@ void ui_audio_build(lv_obj_t *page);
 void ui_audio_update(const struct hbas_vehicle *v);
 /* Returns true if the audio page consumed the key (e.g. while editing). */
 bool ui_audio_key(enum ui_key key);
+void ui_audio_eq_changed(void);             /* EQ moved: custom-system headroom */
 
 void ui_eq_build(lv_obj_t *page);
 void ui_eq_set_backend(const struct hbas_audio_backend *b);
 bool ui_eq_key(enum ui_key key);
+const struct hbas_eq *ui_eq_current(void);
 
 #endif

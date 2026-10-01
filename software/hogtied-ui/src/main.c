@@ -195,7 +195,8 @@ static int snapshot(const char *prefix)
 		{ 22000, "", "03-cruise-low-fuel" },
 		{ 22100, "R", "04-audio" },
 		{ 22200, "DERRR", "05-audio-fade-adjust" },        /* fade 3 steps front */
-		{ 22300, "EDER", "06-audio-driver-headset" },      /* output -> headset, fade hides */
+		{ 22300, "EDER", "06-audio-custom-system" },       /* output -> custom system */
+		{ 22350, "EDER", "06b-audio-driver-headset" },     /* headset -> driver, fade hides */
 		{ 22400, "ER", "07-eq-flat" },
 		{ 22500, "DDD", "08-eq-preset-highway" },          /* Flat -> Bass -> Vocal -> Highway */
 		{ 22600, "ERRRUUU", "09-eq-adjust-1k" },           /* 1 kHz band +3 -> Custom */
@@ -205,7 +206,7 @@ static int snapshot(const char *prefix)
 		/* same bike reporting itself as a trike: third tire appears */
 		{ 23000, "RRR", "13-tires-trike" },
 		/* 2-speaker bike, back on speakers: no fade row */
-		{ 23100, "BRELLE", "14-audio-2-speakers" },
+		{ 23100, "BRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
 	char path[512];

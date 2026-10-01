@@ -66,9 +66,21 @@ volume control, i.e. speed-sensitive volume) and a built-in fallback
 - `software/libhbas/audio.c`: settings model with the stock ranges and tables,
   per-output volume, fade only on 4-speaker bikes and only to speakers, and
   the stock EQ file naming (tested).
-- `hogtied-ui` Audio page: Volume, Fade, Output; the factory EQ profile
-  follows the engine-running flag from the bike. **Bass/treble are dropped
-  on purpose**: the user EQ below replaces them.
+- `hogtied-ui` Audio page: Volume, Fade, Output, Headset. **Bass/treble are
+  dropped on purpose**: the user EQ below replaces them.
+  - **Output = Stock speakers:** Harley's factory EQ for the bike model
+    (engine on/off), stock volume curve (up to +16 dB).
+  - **Output = Custom system** (aftermarket speakers/amp): the factory speaker
+    EQ is bypassed (built-in flat), and the signal never clips. The volume
+    curve is the stock one shifted down 16 dB (every step still changes the
+    level; the top step is exactly 0 dB), and the level drops by the
+    largest user-EQ boost. The amp's gain sets how loud full volume is.
+    Fade stays available.
+  - **Headset (Off / Driver / Passenger):** the Harley comm system's wired
+    helmet jacks (`MIX1_HDST_D/P`, alongside intercom/CB, mics, sidetone and
+    VOX). Media plays there when one is selected, with its own volume, the
+    `HS_<ON|OFF>.bin` profile, and the stock curve. Bluetooth headsets pair
+    with the phone and don't involve the head unit.
 - `hogtied-ui` EQ page + `software/libhbas/eq.c`: a **7-band** graphic EQ
   (63, 160, 400 Hz, 1, 2.5, 6.3, 16 kHz; ±10 dB; Q 1.05 for the ~1.33-octave
   spacing) with presets, made of RBJ peaking biquads. They're encoded in the

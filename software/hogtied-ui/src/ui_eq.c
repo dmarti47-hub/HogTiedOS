@@ -29,6 +29,12 @@ static void apply(void)
 {
 	if (backend && backend->apply_eq)
 		backend->apply_eq(backend->ctx, &eq);
+	ui_audio_eq_changed();
+}
+
+const struct hbas_eq *ui_eq_current(void)
+{
+	return &eq;
 }
 
 static void refresh(void)
