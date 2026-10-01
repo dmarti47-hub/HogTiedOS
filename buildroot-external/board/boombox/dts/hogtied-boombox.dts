@@ -235,16 +235,21 @@
 };
 
 /*
- * [confirmed] Marvell 88W8688 BT/WiFi over SDIO on MMC3 (0x480AD000 IRQ 94),
- * SDIO VID 0x02DF PID 0x3130 -> mainline libertas_sdio (sd8688 firmware).
- * TODO: unconfirmed - bus width, card power/reset GPIO, supply. Until those
- * are known the card may never enumerate.
+ * [confirmed] Bluetooth chip on SDIO, MMC3 (0x480AD000 IRQ 94): stock
+ * bluetooth.sh starts wicome's dev-sdio there, which speaks standard SDIO
+ * Bluetooth Type-A on function 1 (register use matches Linux btsdio) to a
+ * CSR BlueCore ROM chip (wicome.cfg BT_CHIP = CSR_ROM). dev-sdio sets CCCR
+ * 0x07 = 0x82, i.e. a 4-bit bus. It drives no power or reset GPIO; the
+ * "BTReset" device it offers is an in-band SDIO reset. (The Marvell 88W8688
+ * driver also ships, but nothing starts it.) See docs/findings/BLUETOOTH.md.
+ * TODO: unconfirmed - dev-sdio also writes vendor CCCR 0xF0 = 0x11, which
+ * btsdio doesn't; and the card's supply/voltage are not known.
  */
 &mmc3 {
 	status = "okay";
 	non-removable;
 	cap-power-off-card;
-	bus-width = <1>;	/* TODO: unconfirmed - 1-bit until real width known */
+	bus-width = <4>;	/* [confirmed] dev-sdio CCCR 0x07 = 0x82 */
 };
 
 /*

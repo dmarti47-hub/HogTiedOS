@@ -16,6 +16,8 @@
  *   --socket PATH  default /run/hbas/bt.sock
  *   --session      use the session bus (tests with a fake BlueZ)
  *   --agent        be the pairing agent (on the unit; a PC has its own)
+ *   --on-paired CMD  run CMD a few seconds after a phone pairs (the unit
+ *                  saves BlueZ's pairing keys to the eMMC with it)
  *   -v             log D-Bus traffic decisions to stderr
  */
 #define _GNU_SOURCE
@@ -32,6 +34,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <dbus/dbus.h>
@@ -447,12 +450,31 @@ static void reply_ok(DBusMessage *msg)
 	}
 }
 
+static const char *on_paired;
+static time_t save_due;                     /* run on_paired at this time, 0 = no */
+
 static void pair_end(const char *result)
 {
 	char line[HBAS_BT_LINE_MAX];
 
 	hbas_bt_format(line, sizeof(line), "pair-end", "result", result, NULL);
 	broadcast(line);
+	/* bluetoothd writes the keys just after Paired goes true: wait a bit */
+	if (on_paired && !strcmp(result, "ok"))
+		save_due = time(NULL) + 3;
+}
+
+static void run_on_paired(void)
+{
+	pid_t pid;
+
+	save_due = 0;
+	if ((pid = fork()) == 0) {
+		execl("/bin/sh", "sh", "-c", on_paired, (char *)NULL);
+		_exit(127);
+	}
+	if (pid < 0)
+		logmsg("can't run %s: %s", on_paired, strerror(errno));
 }
 
 static void answer_pending(bool yes)
@@ -733,16 +755,20 @@ int main(int argc, char **argv)
 			session = true;
 		else if (!strcmp(argv[i], "--agent"))
 			agent_enabled = true;
+		else if (!strcmp(argv[i], "--on-paired") && i + 1 < argc)
+			on_paired = argv[++i];
 		else if (!strcmp(argv[i], "-v"))
 			verbose++;
 		else {
-			fprintf(stderr, "usage: %s [--socket PATH] [--session] [--agent] [-v]\n", argv[0]);
+			fprintf(stderr, "usage: %s [--socket PATH] [--session] [--agent] "
+				"[--on-paired CMD] [-v]\n", argv[0]);
 			return 2;
 		}
 	}
 	signal(SIGINT, on_sig);
 	signal(SIGTERM, on_sig);
 	signal(SIGPIPE, SIG_IGN);
+	signal(SIGCHLD, SIG_IGN);               /* on-paired children reap themselves */
 
 	dbus_error_init(&err);
 	bus = dbus_bus_get(session ? DBUS_BUS_SESSION : DBUS_BUS_SYSTEM, &err);
@@ -800,6 +826,8 @@ int main(int argc, char **argv)
 			if (clients[i] >= 0 && (p[2 + i].revents & (POLLIN | POLLHUP | POLLERR)))
 				client_input(i);
 		dbus_connection_flush(bus);
+		if (save_due && time(NULL) >= save_due)
+			run_on_paired();
 	}
 	if (pending)
 		answer_pending(false);

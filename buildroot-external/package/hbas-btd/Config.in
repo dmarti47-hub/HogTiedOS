@@ -1,0 +1,9 @@
+config BR2_PACKAGE_HBAS_BTD
+	bool "hbas-btd"
+	depends on BR2_PACKAGE_DBUS
+	depends on BR2_PACKAGE_BLUEZ5_UTILS
+	help
+	  Phone music over Bluetooth for hogtied-ui: tracks the connected
+	  phone and its media player through BlueZ, sends play/pause/
+	  next/previous, and confirms pairing on screen. Sources live in
+	  software/btd in the HogTiedOS repository.

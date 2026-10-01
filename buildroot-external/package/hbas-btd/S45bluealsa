@@ -1,0 +1,24 @@
+#!/bin/sh
+# A2DP sink: bluez-alsa receives the phone's music and bluealsa-aplay plays
+# it on the default ALSA device.
+# TODO: unconfirmed - the head unit has no ALSA playback device to the DSP
+# yet (McBSP4 link format unknown, docs/findings/BLUETOOTH.md), so the audio
+# has nowhere to go until that driver exists.
+
+case "$1" in
+start)
+	printf "Starting bluez-alsa: "
+	start-stop-daemon -S -b -m -p /var/run/bluealsa.pid -x /usr/bin/bluealsa -- \
+		-p a2dp-sink && echo OK || echo FAIL
+	sleep 1
+	start-stop-daemon -S -b -m -p /var/run/bluealsa-aplay.pid -x /usr/bin/bluealsa-aplay -- \
+		--profile-a2dp
+	;;
+stop)
+	start-stop-daemon -K -p /var/run/bluealsa-aplay.pid
+	start-stop-daemon -K -p /var/run/bluealsa.pid
+	rm -f /var/run/bluealsa.pid /var/run/bluealsa-aplay.pid
+	;;
+restart) "$0" stop; "$0" start ;;
+*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

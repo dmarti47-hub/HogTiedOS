@@ -4,11 +4,14 @@
 |---|---|
 | `libhbas/` | C decoder for the bike's CAN messages, field for field from Harley's own `vehicleCAN.lua` (`docs/findings/CROSS_CHECKS.md` sec. 11). No UI or I/O. |
 | `hogtied-ui/` | The main screen, 400x240, LVGL 9.2.2: speed, gear, rpm, warning lights, clock, ambient temperature, tire data. |
+| `btd/` | `hbas-btd`: phone music over Bluetooth. Talks to BlueZ (connected phone, AVRCP track info and play/pause/next/previous, pairing confirmation) and gives the UI a one-line text protocol (`libhbas/btproto.h`). |
 | `iocd/` | `hbas-iocd`: the IOC link on the unit. Answers the power keep-alive, handles shutdown, and forwards bike CAN frames to `vcan0` for the UI. |
 
 Both are built into the image by Buildroot (`buildroot-external/package/hogtied-ui`).
 
 ![Demo ride rendered offline](../docs/screenshots/ui-demo.png)
+
+![Media page](../docs/screenshots/ui-media.png)
 
 ![Audio page](../docs/screenshots/ui-audio.png)
 
@@ -44,6 +47,11 @@ right away. A window opens with the screen at 2x size, playing a demo ride.
 Your settings (volume, fade, output, headset, EQ) are remembered between
 runs in `~/.config/hogtied/settings.conf` (`--settings FILE` to use another
 file). It's plain text; delete it to go back to the defaults.
+
+**Media page** (right after the dash): pair your phone with the PC the
+usual way, play music on it, and the page shows the track; Up/Down pick
+previous / play-pause / next / Pair, Enter presses. (Needs `libdbus-1-dev`;
+the PC's own Bluetooth plays the sound.)
 
 `--bike N` pretends the bike reported configuration N (e.g. `--bike 2` =
 OE FLTR, `--bike 9` = 2-speaker Tri Glide): the System page shows the model,
@@ -106,6 +114,12 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
   bike configuration the IOC sends at startup (DID 0xF1E8) and writes
   `/run/hbas/bike`; the UI picks up the model, speaker count, trike layout
   and factory EQ from it.
+- **Bluetooth music, written, tested on the PC (not on the unit):**
+  `hbas-btd` is tested against a fake BlueZ (`btd/tests/test_btd.py`:
+  track/status updates, every control, pairing accept/reject, bluetoothd
+  restart) and end to end with the UI. On the unit it also needs the Bluetooth
+  chip brought up (SDIO on MMC3) and the A2DP audio routed to the DSP; see
+  `docs/findings/BLUETOOTH.md`.
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.

@@ -437,3 +437,13 @@ Needed to mount the eMMC's FAT32 partition for settings storage.
   at /mnt/emmc.
 - **Still unknown:** the eMMC's maximum clock (the omap_hsmmc default is
   used) and the eMMC's own supply rails. Not yet run on hardware.
+
+## 15. Bluetooth chip: CSR over SDIO (correction)
+
+The handoff's `bt_wifi_gps_map.json` names the Marvell 88W8688 as the
+Bluetooth chip. The active configuration says otherwise: wicome.cfg sets
+`BT_CHIP = CSR_ROM`, `HCI_TRAN = H4`, `UART_DEV = /dev/ser2`, and `/dev/ser2`
+is not a UART at all but a device created by `dev-sdio`, which speaks
+standard SDIO Bluetooth Type-A to the chip on MMC3 (4-bit bus). The Marvell
+Wi-Fi driver ships but nothing starts it. Details, including the CSR
+PS-key setup recovered from `libpal_bt_csr.so`: `BLUETOOTH.md`.

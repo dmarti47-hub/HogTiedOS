@@ -1,0 +1,18 @@
+#!/bin/sh
+# Phone connection and music controls for hogtied-ui (/run/hbas/bt.sock),
+# pairing confirmed on screen; pairings saved to the eMMC.
+
+case "$1" in
+start)
+	printf "Starting hbas-btd: "
+	start-stop-daemon -S -b -m -p /var/run/hbas-btd.pid -x /usr/bin/hbas-btd -- \
+		--agent --on-paired /usr/sbin/hbas-bt-save && echo OK || echo FAIL
+	;;
+stop)
+	printf "Stopping hbas-btd: "
+	start-stop-daemon -K -p /var/run/hbas-btd.pid && echo OK || echo FAIL
+	rm -f /var/run/hbas-btd.pid
+	;;
+restart) "$0" stop; "$0" start ;;
+*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

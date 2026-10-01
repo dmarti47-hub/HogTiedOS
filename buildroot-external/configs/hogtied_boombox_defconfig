@@ -42,6 +42,13 @@ BR2_TARGET_ROOTFS_INITRAMFS=y
 # HogTiedOS userspace
 BR2_PACKAGE_HOGTIED_UI=y
 BR2_PACKAGE_HBAS_IOCD=y
+BR2_PACKAGE_HBAS_BTD=y
+
+# Bluetooth phone music: BlueZ (pairing, AVRCP), bluez-alsa (A2DP sink)
+BR2_PACKAGE_DBUS=y
+BR2_PACKAGE_BLUEZ5_UTILS=y
+BR2_PACKAGE_BLUEZ_ALSA=y
+BR2_ROOTFS_OVERLAY="$(BR2_EXTERNAL_HOGTIED_PATH)/board/boombox/rootfs-overlay"
 
 # No U-Boot: the stock QNX IPL is the bootloader. post-image.sh wraps
 # zImage + DTB into images/hogtied.ifs (tools/ifs-pack) and validates it.

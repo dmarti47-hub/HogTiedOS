@@ -123,7 +123,9 @@ class BtdTest(unittest.TestCase):
         threading.Thread(target=cls.loop.run, daemon=True).start()
         cls.tmp = tempfile.mkdtemp()
         cls.sock_path = os.path.join(cls.tmp, 'bt.sock')
-        cls.btd = subprocess.Popen([BTD, '--session', '--agent', '--socket', cls.sock_path],
+        cls.saved = os.path.join(cls.tmp, 'saved')
+        cls.btd = subprocess.Popen([BTD, '--session', '--agent', '--socket', cls.sock_path,
+                                    '--on-paired', 'touch ' + cls.saved],
                                    stderr=subprocess.PIPE)
         for _ in range(100):
             if os.path.exists(cls.sock_path):
@@ -258,6 +260,19 @@ class BtdTest(unittest.TestCase):
         s.sendall(b'next\n')                       # no player: nothing reaches BlueZ
         time.sleep(0.3)
         self.assertNotIn('Next', [c[0] for c in self.fake.calls])
+        s.close()
+
+    def test_5b_pairing_saves_keys(self):
+        s, f = self.connect()
+        self.changed(DEVICE, 'org.bluez.Device1', {'Paired': False})
+        time.sleep(0.2)
+        self.changed(DEVICE, 'org.bluez.Device1', {'Paired': True})
+        self.assertIn('result=ok', self.expect(f, 'pair-end'))
+        for _ in range(60):                       # runs ~3 s later
+            if os.path.exists(self.saved):
+                break
+            time.sleep(0.1)
+        self.assertTrue(os.path.exists(self.saved), 'on-paired command never ran')
         s.close()
 
     def test_6_bluetoothd_restart_resyncs(self):

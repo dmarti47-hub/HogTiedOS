@@ -1,0 +1,20 @@
+#!/bin/sh
+# Save BlueZ's pairing keys (/var/lib/bluetooth, in RAM on this image) to the
+# eMMC, so paired phones survive a power cycle. Run by hbas-btd after a phone
+# pairs. The eMMC FAT partition stays read-only except for this moment
+# (S30emmc mounts it read-only). Stored as a tar archive: BlueZ's directory
+# names contain ':' which FAT can't hold.
+MNT=/mnt/emmc
+DIR=$MNT/hogtied
+mountpoint -q "$MNT" || { echo "hbas-bt-save: $MNT not mounted"; exit 1; }
+[ -d /var/lib/bluetooth ] || exit 0
+mount -o remount,rw "$MNT" || exit 1
+rc=1
+mkdir -p "$DIR" &&
+	tar -C /var/lib -cf "$DIR/bluetooth.tar.tmp" bluetooth &&
+	sync &&
+	mv -f "$DIR/bluetooth.tar.tmp" "$DIR/bluetooth.tar" &&
+	sync && rc=0
+rm -f "$DIR/bluetooth.tar.tmp"
+mount -o remount,ro "$MNT" || echo "hbas-bt-save: WARNING $MNT left read-write"
+exit $rc

@@ -1,0 +1,16 @@
+#!/bin/sh
+# Restore paired phones (saved by hbas-bt-save) before bluetoothd starts.
+ARCHIVE=/mnt/emmc/hogtied/bluetooth.tar
+
+case "$1" in
+start)
+	printf "Restoring Bluetooth pairings: "
+	if [ -f "$ARCHIVE" ]; then
+		mkdir -p /var/lib && tar -C /var/lib -xf "$ARCHIVE" && echo OK || echo FAIL
+	else
+		echo "none saved"
+	fi
+	;;
+stop|restart) ;;
+*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac
