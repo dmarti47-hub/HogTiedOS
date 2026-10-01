@@ -1,7 +1,8 @@
 #!/bin/sh
 # Build and run the HogTiedOS screen in a desktop window on a Linux PC.
 #
-#   software/run-ui-on-pc.sh            # demo ride
+#   software/run-ui-on-pc.sh            # demo ride (as an OE FLTR)
+#   software/run-ui-on-pc.sh --bike 9   # demo ride as a 2-speaker Tri Glide
 #   software/run-ui-on-pc.sh --can vcan0
 #   software/run-ui-on-pc.sh --replay my-ride.log
 #
@@ -43,6 +44,10 @@ cmake -S "$ROOT/software/hogtied-ui" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release \
       -DLVGL_DIR="$LVGL_DIR" -DHOGTIED_SDL=ON >/dev/null
 cmake --build "$BUILD" -j"$(nproc)"
 
-[ $# -eq 0 ] && set -- --demo
+# no data source given: play the demo ride (as an OE FLTR unless --bike is set)
+case " $* " in
+*" --demo "*|*" --replay "*|*" --can "*) ;;
+*) case " $* " in *" --bike "*) set -- --demo "$@" ;; *) set -- --demo --bike 2 "$@" ;; esac ;;
+esac
 echo "Starting hogtied-ui $*  (Left/Right: pages, Esc: back, close window to quit)"
 exec "$BUILD/hogtied-ui" "$@"

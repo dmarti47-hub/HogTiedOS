@@ -11,6 +11,8 @@
  */
 #include "ui.h"
 
+#include "hbas/bike.h"
+
 #include <stdio.h>
 
 
@@ -27,7 +29,8 @@ static lv_obj_t *ind_engine, *ind_oil, *ind_fuel, *ind_temp;
 /* Tires */
 static lv_obj_t *lbl_tire[HBAS_TIRE_COUNT], *lbl_tpms_state;
 static lv_obj_t *tire_panel[HBAS_TIRE_COUNT], *lbl_tire_name[HBAS_TIRE_COUNT];
-static bool tires_trike;
+static bool tires_trike, cfg_trike;
+static int bike_cfg = -1;
 /* System */
 static lv_obj_t *lbl_sys;
 
@@ -252,7 +255,7 @@ static void fmt_tire(char *buf, size_t n, uint8_t p, uint8_t t)
 
 void ui_update(const struct hbas_vehicle *v)
 {
-	char buf[160];
+	char buf[200], bike[48];
 	unsigned sp;
 	int amb;
 
@@ -287,8 +290,9 @@ void ui_update(const struct hbas_vehicle *v)
 	indicator_set(ind_fuel, v->low_fuel, COL_WARN);
 	indicator_set(ind_temp, v->overtemp, COL_ALARM);
 
-	if ((v->seen & HBAS_SEEN_BODY2) && v->tpms.trike != tires_trike)
-		tires_layout(v->tpms.trike);
+	/* trike: the bike's own TPMS flag, or a trike configuration */
+	if ((((v->seen & HBAS_SEEN_BODY2) && v->tpms.trike) || cfg_trike) != tires_trike)
+		tires_layout(!tires_trike);
 	for (int i = 0; i < HBAS_TIRE_COUNT; i++) {
 		fmt_tire(buf, sizeof(buf), v->tpms.pressure_raw[i], v->tpms.temp_raw[i]);
 		lv_label_set_text(lbl_tire[i], buf);
@@ -297,13 +301,35 @@ void ui_update(const struct hbas_vehicle *v)
 	lv_label_set_text(lbl_tpms_state, !(v->seen & HBAS_SEEN_BODY2) ? "TPMS: no data" :
 			  v->tpms.enabled ? "TPMS: enabled" : "TPMS: not enabled");
 
+	{
+		struct hbas_bike_info b;
+
+		hbas_bike_info((uint8_t)(bike_cfg < 0 ? 0 : bike_cfg), &b);
+		snprintf(bike, sizeof(bike), bike_cfg < 0 ? "not detected yet" : "%s (config %d)",
+			 b.name, bike_cfg);
+	}
 	snprintf(buf, sizeof(buf),
 		 "HogTiedOS\n\n"
+		 "Bike: %s\n"
 		 "Bike data seen: 0x%02x\n"
 		 "Total distance: %lu m\n"
 		 "Display: 400 x 240 RGB565",
-		 (unsigned)v->seen, (unsigned long)v->total_distance_m);
+		 bike, (unsigned)v->seen, (unsigned long)v->total_distance_m);
 	lv_label_set_text(lbl_sys, buf);
+}
+
+void ui_set_bike(int cfg)
+{
+	struct hbas_bike_info b;
+
+	if (cfg > 255)
+		cfg = -1;
+	bike_cfg = cfg;
+	hbas_bike_info((uint8_t)(cfg < 0 ? 0 : cfg), &b);
+	cfg_trike = cfg >= 0 && b.trike;
+	if (cfg >= 0)
+		ui_set_speaker_count(b.speakers);
+	ui_set_bike_config(cfg);                /* factory EQ + Harley preset */
 }
 
 void ui_key(enum ui_key key)

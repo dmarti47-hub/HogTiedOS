@@ -131,8 +131,23 @@ size_t hbas_power_handle(struct hbas_power *p, const uint8_t *m, size_t len, uin
 			p->shutdown_reasons[p->n_shutdown_reasons++] = m[2 + i];
 		return 0;
 
+	case HBAS_PWR_IOC_DIAG_IDENTIFIER: {          /* [3, DID lo, DID hi, value...] */
+		/* onOff.lua diag_identifier(): the IOC sends every DID at startup,
+		 * and an empty one hasn't been written, so it changes nothing */
+		uint16_t did = len >= 3 ? (uint16_t)(m[2] << 8 | m[1]) : 0;
+
+		if (did == HBAS_DID_CONFIGURATION_OPTIONS && len > 3) {
+			size_t n = len - 3 < sizeof(p->config_options) ? len - 3
+								       : sizeof(p->config_options);
+
+			memcpy(p->config_options, m + 3, n);
+			p->have_config_options = true;
+		}
+		return 0;
+	}
+
 	default:
-		return 0;                         /* version / diag IDs: not needed yet */
+		return 0;                         /* version info: not needed yet */
 	}
 }
 

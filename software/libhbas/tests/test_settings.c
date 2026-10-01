@@ -50,6 +50,8 @@ static void test_preset_by_name(void)
 	defaults(&a, &e);
 	CHECK(hbas_settings_parse("version=1\neq.preset=bass\n", &a, &e) == 1);
 	CHECK(e.preset == HBAS_EQ_BASS && e.gain_db[0] == 6);
+	CHECK(hbas_settings_parse("version=1\neq.preset=harley\n", &a, &e) == 1);
+	CHECK(e.preset == HBAS_EQ_HARLEY);           /* gains come from the bike at runtime */
 	/* "custom" without gains stays on the defaults' EQ */
 	defaults(&a, &e);
 	hbas_settings_parse("version=1\neq.preset=custom\n", &a, &e);

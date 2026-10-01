@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include "hbas/eq.h"
+#include "hbas/audio.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: CHECK(%s) failed\n", \
@@ -105,6 +107,37 @@ static void test_safeload_frames(void)
 	CHECK(hbas_dsp_safeload(222, words, HBAS_DSP_SAFELOAD_MAX + 1, f, len) == 0);
 }
 
+static void test_harley_preset(void)
+{
+	struct hbas_eq eq;
+	int8_t g[HBAS_EQ_BANDS];
+	static const int8_t fltr_on_vol5[] = { 6, 3, 0, 0, 0, -4, -6 };
+	static const int8_t fltr_on_vol17[] = { -6, 1, 2, 0, -2, -5, -9 };
+	static const int8_t hs_off_vol5[] = { 2, 1, 0, 0, 0, 0, 1 };
+	static const int8_t flat[HBAS_EQ_BANDS] = { 0 };
+
+	/* selecting the preset alone is flat until the bike is known */
+	hbas_eq_set_preset(&eq, HBAS_EQ_HARLEY);
+	CHECK(eq.preset == HBAS_EQ_HARLEY && !memcmp(eq.gain_db, flat, sizeof(flat)));
+	CHECK(!strcmp(hbas_eq_preset_name(HBAS_EQ_HARLEY), "Harley"));
+	/* OE FLTR (cfg 2), engine on: loudness pulls bass down as volume rises */
+	CHECK(hbas_eq_harley_gains(g, 2, false, true, 5) && !memcmp(g, fltr_on_vol5, 7));
+	CHECK(hbas_eq_harley_gains(g, 2, false, true, 17) && !memcmp(g, fltr_on_vol17, 7));
+	CHECK(hbas_eq_harley_gains(g, 2, false, true, 99) && !memcmp(g, fltr_on_vol17, 7));
+	/* headsets use the HS profile whatever the bike */
+	CHECK(hbas_eq_harley_gains(g, 2, true, false, 5) && !memcmp(g, hs_off_vol5, 7));
+	CHECK(hbas_eq_harley_gains(g, -1, true, false, 5) && !memcmp(g, hs_off_vol5, 7));
+	/* unknown bike, or a config with no factory profile (136: .conf only): flat */
+	CHECK(!hbas_eq_harley_gains(g, -1, false, true, 5) && !memcmp(g, flat, 7));
+	CHECK(!hbas_eq_harley_gains(g, 136, false, true, 5) && !memcmp(g, flat, 7));
+	/* every entry stays within the slider range */
+	for (int cfg = 0; cfg < 256; cfg++)
+		for (unsigned v = 0; v < HBAS_VOL_STEPS; v++)
+			if (hbas_eq_harley_gains(g, cfg, false, v & 1, v))
+				for (int b = 0; b < HBAS_EQ_BANDS; b++)
+					CHECK(g[b] >= -HBAS_EQ_MAX_DB && g[b] <= HBAS_EQ_MAX_DB);
+}
+
 int main(void)
 {
 	test_peaking_math();
@@ -112,6 +145,7 @@ int main(void)
 	test_dsp_words();
 	test_full_eq_fits_one_safeload();
 	test_safeload_frames();
+	test_harley_preset();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return EXIT_FAILURE;

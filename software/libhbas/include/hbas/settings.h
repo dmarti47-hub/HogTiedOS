@@ -9,7 +9,7 @@
  *   fade=8
  *   output=stock|custom
  *   headset=off|driver|passenger
- *   eq.preset=flat|bass|vocal|highway|custom
+ *   eq.preset=flat|harley|bass|vocal|highway|custom
  *   eq.gains=+3,+1,-1,+1,+3,+4,+3
  *
  * Parsing starts from the caller's defaults and only applies keys that are

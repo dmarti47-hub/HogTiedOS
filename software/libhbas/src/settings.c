@@ -13,7 +13,7 @@
 static const char *const system_keys[HBAS_SYS_COUNT] = { "stock", "custom" };
 static const char *const headset_keys[HBAS_HS_COUNT] = { "off", "driver", "passenger" };
 static const char *const preset_keys[HBAS_EQ_PRESET_COUNT] = {
-	"flat", "bass", "vocal", "highway", "custom",
+	"flat", "harley", "bass", "vocal", "highway", "custom",
 };
 static const char *const volume_keys[HBAS_OUT_COUNT] = {
 	"volume.speakers", "volume.headset_driver", "volume.headset_passenger",

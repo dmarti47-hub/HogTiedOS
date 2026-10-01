@@ -9,6 +9,9 @@
  *    where hogtied-ui (--can vcan0) and candump can read them
  *  - turns channel-3 handlebar/front-panel buttons into key events on a
  *    uinput keyboard ("hbas-buttons"), using the stock key letters
+ *  - publishes the bike configuration (DID 0xF1E8, sent by the IOC at
+ *    startup) to /run/hbas/bike for hogtied-ui: model, speaker count, trike,
+ *    factory EQ profile
  *
  * Hardware: McSPI3 via spidev (mode 3, 8-bit, 750 kHz as stock programs it),
  * IPC_REQ = GPIO136 and IPC_ACK = GPIO137 (gpio5 lines 8 and 9) via the GPIO
@@ -36,10 +39,12 @@
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 #include <linux/input.h>
 #include <linux/uinput.h>
 
+#include "hbas/bike.h"
 #include "hbas/buttons.h"
 #include "hbas/ioc.h"
 #include "hbas/vehicle.h"
@@ -298,6 +303,37 @@ static void hexlog(const char *what, uint8_t ch, const uint8_t *d, size_t n)
 
 static void on_sig(int s) { (void)s; stop = 1; }
 
+/*
+ * /run/hbas/bike, written atomically:  config=<byte 0>  options=<8 bytes hex>
+ * Plain text so the UI (or a shell) can read it whenever it starts.
+ */
+#define BIKE_DIR  "/run/hbas"
+#define BIKE_FILE BIKE_DIR "/bike"
+
+static void publish_bike(const struct hbas_power *p)
+{
+	struct hbas_bike_info b;
+	FILE *f;
+
+	hbas_bike_info(p->config_options[0], &b);
+	logmsg("bike configuration %u: %s, %u speakers%s", p->config_options[0], b.name,
+	       b.speakers, b.trike ? ", trike" : "");
+	if (mkdir(BIKE_DIR, 0755) && errno != EEXIST) {
+		logmsg("%s: %s", BIKE_DIR, strerror(errno));
+		return;
+	}
+	if (!(f = fopen(BIKE_FILE ".tmp", "w"))) {
+		logmsg("%s: %s", BIKE_FILE, strerror(errno));
+		return;
+	}
+	fprintf(f, "config=%u\noptions=", p->config_options[0]);
+	for (size_t i = 0; i < sizeof(p->config_options); i++)
+		fprintf(f, "%02x", p->config_options[i]);
+	fprintf(f, "\n");
+	if (fclose(f) || rename(BIKE_FILE ".tmp", BIKE_FILE))
+		logmsg("%s: %s", BIKE_FILE, strerror(errno));
+}
+
 int main(int argc, char **argv)
 {
 	const char *spidev = NULL, *canif = "vcan0";
@@ -311,6 +347,8 @@ int main(int argc, char **argv)
 	uint8_t flow[32], msg[HBAS_IOC_MAX_PAYLOAD], reply[4];
 	int chip, can, opt;
 	bool shutdown_answered = false;
+	uint8_t published[sizeof(pwr.config_options)];
+	bool have_published = false;
 
 	while ((opt = getopt(argc, argv, "s:c:v")) != -1) {
 		switch (opt) {
@@ -369,6 +407,12 @@ int main(int argc, char **argv)
 				if (hbas_power_handle(&pwr, msg, len, reply) &&
 				    hbas_ioc_send(&bus, HBAS_IOC_CH_POWER, reply, 4))
 					logmsg("power reply not acknowledged");
+				if (pwr.have_config_options && (!have_published ||
+				    memcmp(published, pwr.config_options, sizeof(published)))) {
+					memcpy(published, pwr.config_options, sizeof(published));
+					have_published = true;
+					publish_bike(&pwr);
+				}
 				if (pwr.shutdown_requested && !shutdown_answered) {
 					logmsg("IOC shutdown request: syncing");
 					sync();

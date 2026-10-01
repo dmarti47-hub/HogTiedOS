@@ -87,6 +87,7 @@ enum {
 	HBAS_PWR_IOC_EMERGENCY_SHUTDOWN = 4,
 	HBAS_PWR_IOC_LOG_SHUTDOWN = 102,
 };
+#define HBAS_DID_CONFIGURATION_OPTIONS 0xF1E8
 enum { HBAS_PWR_READY_FOR_SHUTDOWN = 0, HBAS_PWR_KEEP_RUNNING = 1 };
 enum { HBAS_PWR_REQ_NORMAL = 0, HBAS_PWR_REQ_RESET_TO_BOOTLOADER = 1,
        HBAS_PWR_REQ_RESET_TO_APPLICATION = 2 };
@@ -109,6 +110,12 @@ struct hbas_power {
 	bool emergency_shutdown;
 	uint8_t shutdown_reasons[8];
 	uint8_t n_shutdown_reasons;
+
+	/* DID 0xF1E8 HD_Configuration_Options (onOff.lua parse_0xF1E8): byte 0
+	 * is the bike configuration (hbas/bike.h), byte 1 CB/intercom/nav/TPMS
+	 * flags. Set once the IOC has sent a written value. */
+	bool have_config_options;
+	uint8_t config_options[8];
 };
 
 /*

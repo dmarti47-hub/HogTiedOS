@@ -16,6 +16,11 @@
  *   --snapshot PREFIX offline: run the demo on a virtual clock and write
  *                     PREFIX-<name>.bmp screenshots, no display needed
  *
+ * Bike configuration (model, speakers, trike, factory EQ): read from
+ * /run/hbas/bike, which hbas-iocd writes when the IOC reports it
+ * (--bike-file PATH to use another file), or --bike N to simulate one on a
+ * PC (N = HD_Configuration_Options byte 0, e.g. 2 = OE FLTR).
+ *
  * Settings (volume, output, EQ, ...) are remembered:
  *   --settings FILE   where to keep them; default on a PC window build:
  *                     ~/.config/hogtied/settings.conf
@@ -158,8 +163,8 @@ static void log_eq(void *ctx, const char *name)
 		fprintf(stderr, "audio: EQ profile %s (not sent: DSP map unknown)\n", name);
 }
 
-/* What a DSP backend would send for the user EQ: one safe-load of five
- * biquads. Which biquad slots the user EQ may own is still open. */
+/* What a DSP backend would send for the user EQ: one safe-load of the 7
+ * tone-slot biquads, replacing stock's tone stage (AUDIO.md sec. 7.3). */
 static void log_user_eq(void *ctx, const struct hbas_eq *eq)
 {
 	int32_t words[HBAS_EQ_BANDS * 5];
@@ -177,7 +182,7 @@ static void log_user_eq(void *ctx, const struct hbas_eq *eq)
 	if (audio_log_quiet)
 		return;
 	fprintf(stderr, "audio: EQ %s [%+d %+d %+d %+d %+d %+d %+d] dB -> %s%zu-frame safe-load "
-		"of %d words to biquads 0-6 (not sent: assumed slots, unconfirmed)\n",
+		"of %d words to tone biquads 0-6 (not sent)\n",
 		hbas_eq_preset_name(eq->preset), eq->gain_db[0], eq->gain_db[1], eq->gain_db[2],
 		eq->gain_db[3], eq->gain_db[4], eq->gain_db[5], eq->gain_db[6], ok ? "" : "OUT OF RANGE ",
 		hbas_dsp_safeload(HBAS_DSP_BIQUAD_BASE, words, HBAS_EQ_BANDS * 5, frames, len),
@@ -213,7 +218,8 @@ static int snapshot(const char *prefix)
 		{ 22300, "EDER", "06-audio-custom-system" },       /* output -> custom system */
 		{ 22350, "EDER", "06b-audio-driver-headset" },     /* headset -> driver, fade hides */
 		{ 22400, "ER", "07-eq-flat" },
-		{ 22500, "DDD", "08-eq-preset-highway" },          /* Flat -> Bass -> Vocal -> Highway */
+		{ 22450, "D", "07b-eq-harley" },                   /* Harley tone for the demo FLTR */
+		{ 22500, "DDD", "08-eq-preset-highway" },          /* Harley -> Bass -> Vocal -> Highway */
 		{ 22600, "ERRRUUU", "09-eq-adjust-1k" },           /* 1 kHz band +3 -> Custom */
 		{ 22700, "ER", "10-tires" },
 		{ 22800, "R", "11-system" },
@@ -222,6 +228,7 @@ static int snapshot(const char *prefix)
 		{ 23000, "RRR", "13-tires-trike" },
 		/* 2-speaker bike, back on speakers: no fade row */
 		{ 23100, "BRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
+		{ 23200, "RD", "15-eq-harley-speakers" },          /* EQ page, Custom -> Harley */
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
 	char path[512];
@@ -232,6 +239,7 @@ static int snapshot(const char *prefix)
 	ui_create();
 	audio_log_quiet = true;
 	ui_set_audio_backend(&log_backend);
+	ui_set_bike(2);                         /* demo bike: OE FLTR, as the IOC would report */
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
 		if (!strcmp(script[i].name, "13-tires-trike"))
 			demo_set_trike(1);
@@ -445,17 +453,34 @@ static lv_display_t *create_display(const char *fbdev)
 #endif
 
 struct live_opts {
-	const char *fbdev, *replay, *can, *settings, *settings_mount;
+	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file;
 	bool demo, stdin_keys;
-	int speakers;
+	int speakers, bike;
 };
+
+/* config=N from hbas-iocd's bike file; -1 if absent or unreadable */
+static int read_bike_file(const char *path)
+{
+	FILE *f = fopen(path, "r");
+	char line[64];
+	int cfg = -1;
+
+	if (!f)
+		return -1;
+	while (fgets(line, sizeof(line), f))
+		if (sscanf(line, "config=%d", &cfg) == 1)
+			break;
+	fclose(f);
+	return cfg >= 0 && cfg <= 255 ? cfg : -1;
+}
 
 static int run_live(const struct live_opts *o)
 {
 #if defined(HOGTIED_FBDEV) || defined(HOGTIED_SDL)
 	FILE *rf = NULL;
 	int cs = -1, buttons = -1;
-	uint32_t start = tick_ms(), next_replay = 0, next_button_scan = 0;
+	uint32_t start = tick_ms(), next_replay = 0, next_button_scan = 0, next_bike_check = 0;
+	int bike = -1;
 	struct can_frame_lite frames[16];
 	char line[256];
 
@@ -474,6 +499,8 @@ static int run_live(const struct live_opts *o)
 	create_display(o->fbdev);
 	ui_set_speaker_count(o->speakers);
 	ui_set_audio_backend(&log_backend);
+	if (o->bike >= 0)
+		ui_set_bike(bike = o->bike);
 	if (o->settings)
 		persist_init(o->settings, o->settings_mount);
 	/* window closed -> display deleted; Ctrl+C / SIGTERM -> stop_requested */
@@ -487,6 +514,16 @@ static int run_live(const struct live_opts *o)
 		}
 		if (buttons >= 0)
 			poll_buttons(buttons);
+		/* the IOC sends the bike configuration once, at startup */
+		if (o->bike < 0 && now >= next_bike_check) {
+			int cfg = read_bike_file(o->bike_file);
+
+			if (cfg != bike && cfg >= 0) {
+				fprintf(stderr, "bike configuration %d\n", cfg);
+				ui_set_bike(bike = cfg);
+			}
+			next_bike_check = now + 2000;
+		}
 
 		if (o->demo) {
 			size_t n = demo_frames(now % 38000, frames, 16);
@@ -512,7 +549,7 @@ static int run_live(const struct live_opts *o)
 #else
 	(void)o;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
-	(void)open_buttons; (void)poll_buttons;
+	(void)open_buttons; (void)poll_buttons; (void)read_bike_file;
 	fprintf(stderr, "built without a display backend; use --snapshot\n");
 	return 1;
 #endif
@@ -520,7 +557,8 @@ static int run_live(const struct live_opts *o)
 
 int main(int argc, char **argv)
 {
-	struct live_opts o = { .fbdev = "/dev/fb0", .speakers = 4 };
+	struct live_opts o = { .fbdev = "/dev/fb0", .speakers = 4, .bike = -1,
+				.bike_file = "/run/hbas/bike" };
 	const char *snap = NULL;
 	static char default_settings[512];
 
@@ -539,13 +577,17 @@ int main(int argc, char **argv)
 			o.replay = argv[++i];
 		else if (!strcmp(argv[i], "--can") && i + 1 < argc)
 			o.can = argv[++i];
+		else if (!strcmp(argv[i], "--bike") && i + 1 < argc)
+			o.bike = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--bike-file") && i + 1 < argc)
+			o.bike_file = argv[++i];
 		else if (!strcmp(argv[i], "--settings") && i + 1 < argc)
 			o.settings = argv[++i];
 		else if (!strcmp(argv[i], "--settings-mount") && i + 1 < argc)
 			o.settings_mount = argv[++i];
 		else {
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
-				"[--fb DEV] [--stdin-keys] [--speakers 2|4]\n"
+				"[--fb DEV] [--stdin-keys] [--speakers 2|4] [--bike N | --bike-file F]\n"
 				"       [--settings FILE [--settings-mount DIR]] | --snapshot PREFIX\n",
 				argv[0]);
 			return 2;

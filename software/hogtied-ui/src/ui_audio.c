@@ -51,9 +51,19 @@ static bool row_visible(int r)
 	return r != HBAS_AI_FADE || hbas_audio_fade_available(&audio);
 }
 
+static void eq_context(void)
+{
+	enum hbas_audio_output out = hbas_audio_output(&audio);
+
+	ui_eq_set_harley_context(bike_cfg, out != HBAS_OUT_SPEAKERS, engine_running,
+				 audio.volume[out]);
+}
+
 static void apply(void)
 {
 	struct hbas_audio_db db;
+
+	eq_context();                           /* Harley preset follows volume/output */
 
 	hbas_audio_to_db(&audio, ui_eq_current(), &db);
 	if (backend && backend->apply)
@@ -69,6 +79,7 @@ static void load_eq(void)
 	hbas_audio_factory_eq(name, sizeof(name), &audio, bike_cfg, engine_running);
 	if (backend && backend->load_eq_profile)
 		backend->load_eq_profile(backend->ctx, name);
+	eq_context();                           /* and bike/engine */
 }
 
 static void refresh(void)
@@ -117,7 +128,7 @@ static void refresh(void)
 						 ? "flat (custom system)" : "flat (bike model ?)");
 	lv_label_set_text_fmt(lbl_eq, "Factory EQ, engine %s: %s",
 			      last_engine < 0 ? "?" : engine_running ? "on" : "off", eq);
-	lv_label_set_text(lbl_dsp, backend && backend->apply ? "DSP not mapped yet: settings logged only"
+	lv_label_set_text(lbl_dsp, backend && backend->apply ? "DSP writes logged only (not sent yet)"
 					 : "DSP: no audio backend");
 	lv_label_set_text(lbl_hint, editing ? LV_SYMBOL_LEFT LV_SYMBOL_RIGHT " adjust  OK done"
 					    : LV_SYMBOL_UP LV_SYMBOL_DOWN " select  OK adjust");

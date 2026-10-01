@@ -4,6 +4,8 @@
 #include <math.h>
 #include <string.h>
 
+#include "harley_eq_table.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -14,13 +16,14 @@ const uint16_t hbas_eq_band_hz[HBAS_EQ_BANDS] = { 63, 160, 400, 1000, 2500, 6300
 static const int8_t presets[HBAS_EQ_PRESET_COUNT][HBAS_EQ_BANDS] = {
 	/*                   63 160 400 1k 2.5k 6.3k 16k */
 	[HBAS_EQ_FLAT]    = { 0,  0,  0, 0,  0,   0,  0 },
+	[HBAS_EQ_HARLEY]  = { 0,  0,  0, 0,  0,   0,  0 },   /* per bike: hbas_eq_harley_gains() */
 	[HBAS_EQ_BASS]    = { 6,  4,  1, 0,  0,   0,  0 },
 	[HBAS_EQ_VOCAL]   = { -2, -1, 0, 2,  3,   1,  0 },
 	[HBAS_EQ_HIGHWAY] = { 3,  1, -1, 1,  3,   4,  3 },   /* lift over wind/engine noise */
 	[HBAS_EQ_CUSTOM]  = { 0,  0,  0, 0,  0,   0,  0 },
 };
 static const char *const preset_names[HBAS_EQ_PRESET_COUNT] = {
-	"Flat", "Bass", "Vocal", "Highway", "Custom",
+	"Flat", "Harley", "Bass", "Vocal", "Highway", "Custom",
 };
 
 void hbas_eq_set_preset(struct hbas_eq *eq, enum hbas_eq_preset p)
@@ -35,6 +38,25 @@ void hbas_eq_set_preset(struct hbas_eq *eq, enum hbas_eq_preset p)
 const char *hbas_eq_preset_name(enum hbas_eq_preset p)
 {
 	return p < HBAS_EQ_PRESET_COUNT ? preset_names[p] : "?";
+}
+
+bool hbas_eq_harley_gains(int8_t gain_db[HBAS_EQ_BANDS], int bike_cfg, bool headset,
+			  bool engine_on, unsigned vol_step)
+{
+	int cfg = headset ? HBAS_HARLEY_HEADSET : bike_cfg;
+
+	if (vol_step >= HBAS_VOL_STEPS)
+		vol_step = HBAS_VOL_STEPS - 1;
+	for (unsigned i = 0; cfg >= 0 && i < hbas_harley_voicing_count; i++) {
+		const struct hbas_harley_voicing *v = &hbas_harley_voicing[i];
+
+		if (v->cfg == cfg && v->engine_on == engine_on) {
+			memcpy(gain_db, v->gain_db[vol_step], HBAS_EQ_BANDS);
+			return true;
+		}
+	}
+	memset(gain_db, 0, HBAS_EQ_BANDS);
+	return false;
 }
 
 int hbas_eq_adjust(struct hbas_eq *eq, unsigned band, int delta)

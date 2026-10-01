@@ -3,6 +3,10 @@
  * EQ page: 7-band graphic EQ (libhbas/eq) with a live response curve. It is
  * the only tone control: it takes the biquad set stock uses for bass/treble.
  *
+ * Harley preset: the stock radio's tone for this bike (loudness contour +
+ * voicing, libhbas hbas_eq_harley_gains). Like stock it follows the volume
+ * step, engine on/off and speakers vs headset, so its sliders move with them.
+ *
  * Keys: Up/Down choose a preset. Enter starts adjusting: Left/Right pick a
  * band, Up/Down move its slider, Enter or Back finishes. While not adjusting,
  * Left/Right switch pages (ui.c).
@@ -11,6 +15,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #define CURVE_POINTS 60
 #define CURVE_RANGE  12                     /* chart shows +/-12 dB */
@@ -19,11 +24,27 @@ static struct hbas_eq eq;
 static const struct hbas_audio_backend *backend;
 static int band;
 static bool editing;
+static struct { int cfg; bool headset, engine_on; unsigned vol; } harley = { -1, false, false, 5 };
+static bool harley_known;
 
 static lv_obj_t *chart;
 static lv_chart_series_t *series;
 static lv_obj_t *slider[HBAS_EQ_BANDS], *val[HBAS_EQ_BANDS], *freq[HBAS_EQ_BANDS];
 static lv_obj_t *lbl_preset, *lbl_hint;
+
+/* Harley preset: recompute its gains for the current context. */
+static bool harley_update(void)
+{
+	int8_t g[HBAS_EQ_BANDS];
+
+	if (eq.preset != HBAS_EQ_HARLEY)
+		return false;
+	harley_known = hbas_eq_harley_gains(g, harley.cfg, harley.headset, harley.engine_on, harley.vol);
+	if (!memcmp(g, eq.gain_db, sizeof(g)))
+		return false;
+	memcpy(eq.gain_db, g, sizeof(g));
+	return true;
+}
 
 static void apply(void)
 {
@@ -59,7 +80,14 @@ static void refresh(void)
 		lv_obj_set_style_border_width(slider[b], hi ? 2 : 0, 0);
 		lv_obj_set_style_bg_color(slider[b], hi ? lv_color_hex(0x4A2A12) : COL_PANEL_HI, LV_PART_MAIN);
 	}
-	lv_label_set_text_fmt(lbl_preset, "Preset: %s", hbas_eq_preset_name(eq.preset));
+	if (eq.preset != HBAS_EQ_HARLEY)
+		lv_label_set_text_fmt(lbl_preset, "Preset: %s", hbas_eq_preset_name(eq.preset));
+	else if (harley_known)
+		lv_label_set_text(lbl_preset, harley.headset ? "Preset: Harley (headset)"
+							     : "Preset: Harley (auto)");
+	else
+		lv_label_set_text(lbl_preset, harley.cfg < 0 ? "Preset: Harley (no bike: flat)"
+							     : "Preset: Harley (no tuning: flat)");
 	lv_label_set_text(lbl_hint, editing ? LV_SYMBOL_LEFT LV_SYMBOL_RIGHT " band  "
 					      LV_SYMBOL_UP LV_SYMBOL_DOWN " level  OK done"
 					    : LV_SYMBOL_UP LV_SYMBOL_DOWN " preset  OK adjust");
@@ -133,8 +161,21 @@ void ui_eq_set(const struct hbas_eq *e)
 {
 	eq = *e;
 	editing = false;
+	harley_update();
 	apply();
 	refresh();
+}
+
+void ui_eq_set_harley_context(int bike_cfg, bool headset, bool engine_on, unsigned vol_step)
+{
+	harley.cfg = bike_cfg;
+	harley.headset = headset;
+	harley.engine_on = engine_on;
+	harley.vol = vol_step;
+	if (harley_update()) {
+		apply();
+		refresh();
+	}
 }
 
 void ui_eq_set_backend(const struct hbas_audio_backend *b)
@@ -165,6 +206,7 @@ bool ui_eq_key(enum ui_key key)
 
 			p = (p + (key == UI_KEY_DOWN ? 1 : n - 1)) % n;
 			hbas_eq_set_preset(&eq, (enum hbas_eq_preset)p);
+			harley_update();
 			changed = true;
 			break;
 		}

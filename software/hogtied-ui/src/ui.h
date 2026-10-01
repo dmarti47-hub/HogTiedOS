@@ -21,7 +21,9 @@ enum ui_page ui_current_page(void);
 /* Audio: where settings go (NULL = nowhere), and bike facts that shape it. */
 void ui_set_audio_backend(const struct hbas_audio_backend *b);
 void ui_set_speaker_count(uint8_t speakers);   /* 2 or 4; fade needs 4 */
-void ui_set_bike_config(int cfg);               /* HD_Configuration_Options, -1 unknown */
+/* The bike's configuration (HD_Configuration_Options byte 0 from the IOC,
+ * -1 unknown): model name, stock speaker count, trike, factory EQ. */
+void ui_set_bike(int cfg);
 
 /*
  * Settings the rider changes (audio and EQ pages), for saving across power
@@ -54,6 +56,7 @@ void ui_audio_update(const struct hbas_vehicle *v);
 /* Returns true if the audio page consumed the key (e.g. while editing). */
 bool ui_audio_key(enum ui_key key);
 void ui_audio_eq_changed(void);             /* EQ moved: custom-system headroom */
+void ui_set_bike_config(int cfg);           /* audio part of ui_set_bike() */
 void ui_settings_touch(void);               /* the rider changed a setting */
 
 void ui_eq_build(lv_obj_t *page);
@@ -61,5 +64,7 @@ void ui_eq_set_backend(const struct hbas_audio_backend *b);
 bool ui_eq_key(enum ui_key key);
 const struct hbas_eq *ui_eq_current(void);
 void ui_eq_set(const struct hbas_eq *eq);
+/* What the Harley preset follows (from the audio page). */
+void ui_eq_set_harley_context(int bike_cfg, bool headset, bool engine_on, unsigned vol_step);
 
 #endif

@@ -83,9 +83,15 @@ and a built-in fallback `Harley_FlatEQ_withToneLoudness.EQF`.
     VOX). Media plays there when one is selected, with its own volume, the
     `HS_<ON|OFF>.bin` profile, and the stock curve. Bluetooth headsets pair
     with the phone and don't involve the head unit.
+- **Bike detection:** the IOC sends DID 0xF1E8 HD_Configuration_Options on
+  channel 2 at startup (`[3, 0xE8, 0xF1, value...]`, onOff.lua
+  `diag_identifier`). hbas-iocd publishes byte 0 to `/run/hbas/bike`; the UI
+  takes the model name, stock speaker count, trike flag and factory EQ file
+  from it (`libhbas/bike.c`, from onOff.lua's `Bike_Config_Enum`).
 - `hogtied-ui` EQ page + `software/libhbas/eq.c`: a **7-band** graphic EQ
   (63, 160, 400 Hz, 1, 2.5, 6.3, 16 kHz; ±10 dB; Q 1.05 for the ~1.33-octave
-  spacing) with presets, made of RBJ peaking biquads at 48 kHz (confirmed,
+  spacing) with presets Flat (default), Harley (sec. 7.5), Bass, Vocal and
+  Highway, made of RBJ peaking biquads at 48 kHz (confirmed,
   sec. 7.2), encoded in the verified DSP format (sec. 6) and packed into one
   35-word safe-load to the tone slots. See sec. 7.3 for what those slots
   hold in stock.
@@ -189,15 +195,41 @@ drives the filter (from `fixed_tone_update_filters` 0x128764 and `setTone`):
 |---|---|---|
 | 1 | **bass knob** (0-16) | slot 0-1, low shelf 66-124 Hz |
 | 4 | **treble knob** (0-16) | slot 1-2, high shelf 5.0-6.0 kHz |
-| 8 | **fixed** (no control) | slots 0, 2-6: 60-200 Hz, 1-2.5 kHz, 4.7-7.5 kHz, and type-8 filters (handled by a different routine, 0x128054; not decoded) |
+| 8 | **volume step** (loudness): field +0xB = volume step - 1, set whenever MEDIA→SPKRS volume changes (0x10d274) | slots 0, 2-6: 60-200 Hz, 1-2.5 kHz, 4.7-7.5 kHz, plus type-8 gain stages |
 | 16 | **vehicle speed** (breakpoints 25/50/75/100) | slot 6: a speed-dependent 124 Hz boost |
 
-A typical speaker profile (`02_ON.bin`) uses all 7: slot 0 fixed, 1 bass,
-2 treble, 3-5 fixed, 6 speed. So these slots carry part of Harley's tuning
-(fixed voicing and speed compensation), not just bass/treble. **A 7-band
-user EQ written to all 7 slots replaces that tuning.** The per-speaker
-factory EQ (tag 0x36 bank, layout table 11) is a separate set and is
-unaffected.
+A typical speaker profile (`02_ON.bin`) uses all 7: slot 0 a gain stage,
+1 bass, 2 treble, 3-5 loudness, 6 speed. So these slots carry Harley's
+**loudness contour** (bass and treble that change with the volume step; at
+high volume bass is pulled back) and speed compensation, not just
+bass/treble. **A 7-band user EQ written to all 7 slots replaces that.** The
+per-speaker factory EQ (tag 0x36 bank, layout table 11) is a separate set
+and is unaffected.
+
+**Bass/treble step 8 is flat** (verified by running the stock design code,
+sec. 7.5): steps 0-16 cover roughly -6..+2 dB of bass shelf and -9..+9 dB of
+treble shelf at 60 Hz / 10 kHz on `02_ON.bin`.
+
+### 7.5 Harley preset: running Harley's own filter design
+
+`tools/eq-voicing/harley_tone.py` loads stock audioCtrlSvc into Unicorn and
+calls its `fixed_tone_load_eq` (0x1288a8) and `fixed_tone_update_filters`
+(0x128764) on a profile's tag-0x61 records, so the coefficients are exactly
+what the stock radio computes. `gen_harley_eq.py` does this for every
+`<cfg>_<ON|OFF>.bin` and `HS_<ON|OFF>.bin` (54 bike configurations plus
+headsets), at each of the 18 volume steps, with bass/treble at 8 and speed
+0, and fits the curve (relative to 1 kHz) with the HogTiedOS 7-band EQ.
+Fit error: median 0.4 dB RMS, 90% under 0.7 dB, worst 2.0 dB (2-speaker
+bikes at the lowest volumes, where Harley asks for ~+15 dB of bass and the
+sliders stop at +10). Only the fitted integers are committed
+(`libhbas/src/harley_eq_table.c`); a test regenerates the table from the
+firmware and checks it is identical.
+
+In HogTiedOS the **Harley** EQ preset uses that table for the detected bike
+and follows the volume step, engine on/off and speakers vs headset, like the
+stock radio. **Flat** stays the default. Configurations with no factory
+profile (e.g. 136-139, which ship only a `.conf`) give flat, as stock falls
+back to flat. Not reproduced: the speed-dependent boost (slot 6).
 
 ### 7.4 Still unknown after this pass
 
@@ -205,5 +237,5 @@ unaffected.
   (no program download in audioCtrlSvc; bench item 1).
 - The per-channel fade offset (+0x203) and its source; output-gain channels
   4-9 and mute channels: what each one is.
-- Tag 0x61 per-type data (the knob step → gain law), filter types 2 and 8 in
-  detail. Not needed while HogTiedOS replaces bass/treble.
+- Tag 0x61 per-type data layout (the stock code is run instead of decoded,
+  sec. 7.5).

@@ -14,6 +14,8 @@ Both are built into the image by Buildroot (`buildroot-external/package/hogtied-
 
 ![EQ page](../docs/screenshots/ui-eq.png)
 
+![Harley preset on an OE FLTR](../docs/screenshots/ui-eq-harley.png)
+
 ## Running the screen on your PC
 
 One-time setup (Ubuntu / Debian / Pop!_OS):
@@ -42,6 +44,11 @@ right away. A window opens with the screen at 2x size, playing a demo ride.
 Your settings (volume, fade, output, headset, EQ) are remembered between
 runs in `~/.config/hogtied/settings.conf` (`--settings FILE` to use another
 file). It's plain text; delete it to go back to the defaults.
+
+`--bike N` pretends the bike reported configuration N (e.g. `--bike 2` =
+OE FLTR, `--bike 9` = 2-speaker Tri Glide): the System page shows the model,
+the trike tire layout and speaker count follow, and the EQ page's **Harley**
+preset shows that bike's factory tone, changing as you change the volume.
 
 Other data sources: `software/run-ui-on-pc.sh --replay FILE` (lines like
 `541#0BB803E800000300`, candump -L style) or `--can vcan0` (live Linux
@@ -93,6 +100,10 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
   `hogtied/` folder is ever written (the stock apps/nav/speech files there are
   left alone). Written and tested on the PC (including the read-only remount,
   in a mount namespace), not yet on hardware.
+- **Bike detection, written, not hardware-tested:** hbas-iocd catches the
+  bike configuration the IOC sends at startup (DID 0xF1E8) and writes
+  `/run/hbas/bike`; the UI picks up the model, speaker count, trike layout
+  and factory EQ from it.
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.

@@ -4,6 +4,7 @@
  * every transfer must be one the IOC expects at that point, and it only
  * produces an ACK after a transfer it accepted.
  */
+#include "hbas/bike.h"
 #include "hbas/ioc.h"
 #include "hbas/vehicle.h"
 
@@ -223,6 +224,33 @@ static void test_short_messages_ignored(void)
 	CHECK(hbas_power_handle(&p, NULL, 0, r) == 0);
 }
 
+static void test_bike_configuration(void)
+{
+	struct hbas_power p = { 0 };
+	struct hbas_bike_info b;
+	uint8_t reply[4];
+	static const uint8_t empty[] = { 3, 0xE8, 0xF1 };
+	static const uint8_t fltr[] = { 3, 0xE8, 0xF1, 2, 0x8A, 0, 0, 0, 0, 0, 0 };
+	static const uint8_t vin[] = { 3, 0xEF, 0xF1, '1', 'H', 'D' };
+
+	/* at startup the IOC sends unwritten DIDs empty: keep "unknown" */
+	CHECK(hbas_power_handle(&p, empty, sizeof(empty), reply) == 0 && !p.have_config_options);
+	CHECK(hbas_power_handle(&p, vin, sizeof(vin), reply) == 0 && !p.have_config_options);
+	CHECK(hbas_power_handle(&p, fltr, sizeof(fltr), reply) == 0);
+	CHECK(p.have_config_options && p.config_options[0] == 2 && p.config_options[1] == 0x8A);
+
+	hbas_bike_info(2, &b);
+	CHECK(b.known && !strcmp(b.name, "OE FLTR") && b.speakers == 4 && !b.trike);
+	hbas_bike_info(3, &b);
+	CHECK(b.speakers == 2);
+	hbas_bike_info(9, &b);
+	CHECK(b.trike && b.speakers == 2 && !strcmp(b.name, "OE FLHT-TriGlide"));
+	hbas_bike_info(224, &b);
+	CHECK(b.trike);
+	hbas_bike_info(100, &b);
+	CHECK(!b.known && b.speakers == 4 && !strcmp(b.name, "Reserved"));
+}
+
 int main(void)
 {
 	test_send_framing();
@@ -233,6 +261,7 @@ int main(void)
 	test_power_ioc_in_bootloader();
 	test_power_shutdown();
 	test_short_messages_ignored();
+	test_bike_configuration();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return EXIT_FAILURE;

@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)          # tests use statement expressions
 
 add_library(hbas STATIC src/vehicle.c src/ioc.c src/buttons.c src/audio.c src/eq.c src/settings.c
-  src/dsp.c)
+  src/dsp.c src/harley_eq_table.c src/bike.c)
 target_include_directories(hbas PUBLIC include)
 target_link_libraries(hbas PUBLIC m)
 target_compile_options(hbas PRIVATE -Wall -Wextra -Werror)
