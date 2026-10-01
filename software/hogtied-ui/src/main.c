@@ -160,7 +160,7 @@ static void log_eq(void *ctx, const char *name)
 {
 	(void)ctx;
 	if (!audio_log_quiet)
-		fprintf(stderr, "audio: EQ profile %s (not sent: DSP map unknown)\n", name);
+		fprintf(stderr, "audio: factory EQ profile %s (not sent: profile loading not written yet)\n", name);
 }
 
 /* What a DSP backend would send for the user EQ: one safe-load of the 7
