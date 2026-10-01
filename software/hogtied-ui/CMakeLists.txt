@@ -16,6 +16,10 @@ endif()
 set(LV_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/lv_conf.h CACHE STRING "" FORCE)
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
+# Always link LVGL statically: Buildroot passes BUILD_SHARED_LIBS=ON, which
+# built a liblvgl.so.9 that EXCLUDE_FROM_ALL never installs, so the app
+# couldn't start on the target.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LVGL_DIR} lvgl EXCLUDE_FROM_ALL)
 if(HOGTIED_FBDEV)
   target_compile_definitions(lvgl PUBLIC HOGTIED_FBDEV)

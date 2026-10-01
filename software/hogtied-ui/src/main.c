@@ -15,8 +15,9 @@
  *   --snapshot PREFIX offline: run the demo on a virtual clock and write
  *                     PREFIX-<name>.bmp screenshots, no display needed
  *
- * Keys: --stdin-keys reads a/d (left/right), w/s (up/down), Enter, q (back)
- * from stdin, e.g. over the UART console, until the handlebar driver exists.
+ * Keys: handlebar and front-panel buttons come from the "hbas-buttons" input
+ * device (hbas-iocd). --stdin-keys also reads a/d (left/right), w/s
+ * (up/down), Enter, q (back) from stdin, e.g. over the UART console.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -28,7 +29,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <dirent.h>
 #include <linux/can.h>
+#include <linux/input.h>
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -202,6 +205,59 @@ static bool parse_line(const char *line, struct can_frame_lite *f)
 	return true;
 }
 
+/*
+ * Handlebar/front-panel buttons arrive as the "hbas-buttons" keyboard that
+ * hbas-iocd creates, using the stock key letters (CROSS_CHECKS sec. 13).
+ */
+static int open_buttons(void)
+{
+	DIR *d = opendir("/dev/input");
+	struct dirent *e;
+	int found = -1;
+
+	while (d && (e = readdir(d)) && found < 0) {
+		char path[300], name[64] = "";
+		int fd;
+
+		if (strncmp(e->d_name, "event", 5))
+			continue;
+		snprintf(path, sizeof(path), "/dev/input/%s", e->d_name);
+		fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+		if (fd < 0)
+			continue;
+		if (ioctl(fd, EVIOCGNAME(sizeof(name)), name) >= 0 && !strcmp(name, "hbas-buttons"))
+			found = fd;
+		else
+			close(fd);
+	}
+	if (d)
+		closedir(d);
+	return found;
+}
+
+static bool button_to_ui_key(int code, enum ui_key *k)
+{
+	switch (code) {
+	case KEY_U: case KEY_W: *k = UI_KEY_UP; return true;      /* right / left up */
+	case KEY_J: case KEY_S: *k = UI_KEY_DOWN; return true;
+	case KEY_H: case KEY_A: *k = UI_KEY_LEFT; return true;
+	case KEY_K: case KEY_D: *k = UI_KEY_RIGHT; return true;
+	case KEY_ENTER: case KEY_SPACE: *k = UI_KEY_ENTER; return true;  /* centers */
+	case KEY_I: *k = UI_KEY_BACK; return true;                 /* HOME */
+	default: return false;
+	}
+}
+
+static void poll_buttons(int fd)
+{
+	struct input_event ev;
+	enum ui_key k;
+
+	while (read(fd, &ev, sizeof(ev)) == (ssize_t)sizeof(ev))
+		if (ev.type == EV_KEY && ev.value == 1 && button_to_ui_key(ev.code, &k))
+			ui_key(k);
+}
+
 static void poll_keys(void)
 {
 	char c;
@@ -224,8 +280,8 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 #ifdef HOGTIED_FBDEV
 	lv_display_t *d = lv_linux_fbdev_create();
 	FILE *rf = NULL;
-	int cs = -1;
-	uint32_t start = tick_ms(), next_replay = 0;
+	int cs = -1, buttons = -1;
+	uint32_t start = tick_ms(), next_replay = 0, next_button_scan = 0;
 	struct can_frame_lite frames[16];
 	char line[256];
 
@@ -243,6 +299,14 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 	ui_create();
 	for (;;) {
 		uint32_t now = tick_ms() - start;
+
+		/* hbas-iocd may create the button device after we start */
+		if (buttons < 0 && now >= next_button_scan) {
+			buttons = open_buttons();
+			next_button_scan = now + 2000;
+		}
+		if (buttons >= 0)
+			poll_buttons(buttons);
 
 		if (demo) {
 			size_t n = demo_frames(now % 38000, frames, 16);
@@ -265,6 +329,7 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 #else
 	(void)fbdev; (void)demo; (void)replay; (void)can; (void)stdin_keys;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
+	(void)open_buttons; (void)poll_buttons;
 	fprintf(stderr, "built without a display backend; use --snapshot\n");
 	return 1;
 #endif

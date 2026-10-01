@@ -61,7 +61,7 @@ package/hbas-iocd                   IOC link daemon (software/iocd + libhbas)
   IDCODE print on the first UART boot.
 - Pin settings are applied as one block per pin controller (exactly the
   IPL's table), not yet split per device.
-- The IOC link daemon (`hbas-iocd`) is untested on hardware. REQ/ACK edge
-  polarity is unknown, and handlebar buttons (channel 3) aren't decoded yet.
+- The IOC link daemon (`hbas-iocd`, incl. buttons) is untested on hardware.
+  REQ/ACK edge polarity is unknown.
 - Display pixel clock is unresolved (pcd=8 vs refresh=60).
 - The DSP and IOC SPI devices are placeholders with no drivers.

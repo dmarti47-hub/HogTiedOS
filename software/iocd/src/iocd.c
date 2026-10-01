@@ -7,7 +7,8 @@
  *  - on an IOC shutdown request: sync(), then READY_FOR_SHUTDOWN
  *  - forwards channel-4 bike CAN frames to a SocketCAN interface (vcan0),
  *    where hogtied-ui (--can vcan0) and candump can read them
- *  - logs channel-3 faceplate messages (button decoding comes later)
+ *  - turns channel-3 handlebar/front-panel buttons into key events on a
+ *    uinput keyboard ("hbas-buttons"), using the stock key letters
  *
  * Hardware: McSPI3 via spidev (mode 3, 8-bit, 750 kHz as stock programs it),
  * IPC_REQ = GPIO136 and IPC_ACK = GPIO137 (gpio5 lines 8 and 9) via the GPIO
@@ -36,6 +37,10 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 
+#include <linux/input.h>
+#include <linux/uinput.h>
+
+#include "hbas/buttons.h"
 #include "hbas/ioc.h"
 #include "hbas/vehicle.h"
 
@@ -190,6 +195,96 @@ static void forward_can(int s, const uint8_t *msg, size_t len)
 		logmsg("CAN write: %s", strerror(errno));
 }
 
+/* ---- buttons -> uinput keyboard ----------------------------------------- */
+
+/*
+ * Stock key codes are ASCII (CROSS_CHECKS sec. 13). They're reported as the
+ * Linux key with the same character, so the mapping stays 1:1 with stock:
+ * right handlebar U/J/H/K/Enter, left W/S/A/D/Space, home I, power O, ...
+ */
+static int linux_key(uint8_t c)
+{
+	static const int letters[26] = {
+		KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J,
+		KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T,
+		KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z,
+	};
+	static const int digits[10] = {
+		KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9,
+	};
+
+	if (c >= 'A' && c <= 'Z')
+		return letters[c - 'A'];
+	if (c >= '0' && c <= '9')
+		return digits[c - '0'];
+	switch (c) {
+	case 13: return KEY_ENTER;
+	case ' ': return KEY_SPACE;
+	case '\\': return KEY_BACKSLASH;
+	case ',': return KEY_COMMA;
+	case '.': return KEY_DOT;
+	case '+': return KEY_KPPLUS;
+	case ';': return KEY_SEMICOLON;
+	case '\'': return KEY_APOSTROPHE;
+	case '`': return KEY_GRAVE;
+	case '/': return KEY_SLASH;
+	case '-': return KEY_MINUS;
+	case '[': return KEY_LEFTBRACE;
+	case ']': return KEY_RIGHTBRACE;
+	default: return -1;
+	}
+}
+
+static int open_uinput(void)
+{
+	struct uinput_setup us = { .id = { .bustype = BUS_VIRTUAL } };
+	int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+
+	if (fd < 0) {
+		logmsg("/dev/uinput: %s (buttons disabled)", strerror(errno));
+		return -1;
+	}
+	ioctl(fd, UI_SET_EVBIT, EV_KEY);
+	for (int c = 0; c < 128; c++)
+		if (linux_key((uint8_t)c) >= 0)
+			ioctl(fd, UI_SET_KEYBIT, linux_key((uint8_t)c));
+	snprintf(us.name, sizeof(us.name), "hbas-buttons");
+	if (ioctl(fd, UI_DEV_SETUP, &us) < 0 || ioctl(fd, UI_DEV_CREATE) < 0) {
+		logmsg("uinput setup: %s (buttons disabled)", strerror(errno));
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+static void emit_key(int fd, int code, int value)
+{
+	struct input_event ev[2] = {
+		{ .type = EV_KEY, .code = (uint16_t)code, .value = value },
+		{ .type = EV_SYN, .code = SYN_REPORT },
+	};
+
+	if (write(fd, ev, sizeof(ev)) != (ssize_t)sizeof(ev) && verbose)
+		logmsg("uinput write: %s", strerror(errno));
+}
+
+static void handle_buttons(int ui, struct hbas_buttons *btn, const uint8_t *msg, size_t len)
+{
+	struct hbas_key_event ev[32];
+	size_t n = hbas_buttons_decode(btn, msg, len, ev, 32);
+
+	for (size_t i = 0; i < n; i++) {
+		int key = linux_key(ev[i].code);
+		const char *name = hbas_key_name(ev[i].code);
+
+		if (verbose)
+			logmsg("key %s (%d) %s", name ? name : "?", ev[i].code,
+			       ev[i].pressed ? "down" : "up");
+		if (ui >= 0 && key >= 0)
+			emit_key(ui, key, ev[i].pressed);
+	}
+}
+
 /* ---- main loop ---------------------------------------------------------- */
 
 static void hexlog(const char *what, uint8_t ch, const uint8_t *d, size_t n)
@@ -209,6 +304,8 @@ int main(int argc, char **argv)
 	struct hw h = { -1, -1, -1 };
 	struct hbas_ioc_bus bus = { &h, hw_transfer, hw_wait_ack, hw_drain_ack };
 	struct hbas_power pwr = { 0 };
+	struct hbas_buttons btn;
+	int ui;
 	bool xon[HBAS_IOC_NUM_CHANNELS] = { 0 };
 	char chip_path[32];
 	uint8_t flow[32], msg[HBAS_IOC_MAX_PAYLOAD], reply[4];
@@ -242,6 +339,8 @@ int main(int argc, char **argv)
 	    (h.ack_fd = request_edges(chip, ACK_LINE, "ioc-ack")) < 0)
 		return 1;
 	can = open_can(canif);          /* optional: keep running without it */
+	ui = open_uinput();             /* optional too */
+	hbas_buttons_init(&btn, HBAS_LAYOUT_A);   /* the layout stock always uses */
 
 	/* Announce the channels we serve (unopened channels are XOFF in stock). */
 	xon[HBAS_IOC_CH_FLOW] = xon[HBAS_IOC_CH_POWER] = true;
@@ -280,6 +379,11 @@ int main(int argc, char **argv)
 				break;
 			case HBAS_IOC_CH_VEHICLE:
 				forward_can(can, msg, len);
+				break;
+			case HBAS_IOC_CH_FACEPLATE:
+				if (verbose)          /* raw bytes, to confirm layout A on hardware */
+					hexlog("faceplate", ch, msg, len);
+				handle_buttons(ui, &btn, msg, len);
 				break;
 			case HBAS_IOC_CH_FLOW: {
 				bool their[HBAS_IOC_NUM_CHANNELS] = { 0 };

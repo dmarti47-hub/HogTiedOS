@@ -9,6 +9,22 @@ TOOLS="${BR2_EXTERNAL_HOGTIED_PATH}/../tools/ifs-pack"
 CROSS="${HOST_DIR}/bin/arm-linux-"
 WORK="${BUILD_DIR}/hogtied-ifs"
 
+# Every shared library a program needs must exist in the image (a missing
+# liblvgl.so once made hogtied-ui unable to start; only a hardware boot
+# would have shown it).
+missing=0
+for f in "${TARGET_DIR}"/usr/bin/* "${TARGET_DIR}"/usr/sbin/* "${TARGET_DIR}"/bin/* "${TARGET_DIR}"/sbin/*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    for lib in $("${HOST_DIR}/bin/arm-linux-readelf" -d "$f" 2>/dev/null |
+                 sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+        if [ ! -e "${TARGET_DIR}/lib/${lib}" ] && [ ! -e "${TARGET_DIR}/usr/lib/${lib}" ]; then
+            echo "post-image: ${f#${TARGET_DIR}} needs missing ${lib}" >&2
+            missing=1
+        fi
+    done
+done
+[ "$missing" = 0 ] || exit 1
+
 mkdir -p "${WORK}"
 "${CROSS}gcc" -c -march=armv7-a -marm -o "${WORK}/shim.o" "${TOOLS}/shim.S"
 if "${CROSS}readelf" -r "${WORK}/shim.o" | grep -q 'Relocation section'; then

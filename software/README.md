@@ -43,5 +43,8 @@ so no display is needed. Built with `-DHOGTIED_FBDEV=ON`, it drives
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.
-- **Handlebar buttons:** these arrive on IOC channel 3, which iocd only logs
-  for now. Until they're decoded, pages change with `--stdin-keys`.
+- **Buttons, written, not hardware-tested:** channel-3 handlebar and
+  front-panel buttons are decoded with the stock key map (CROSS_CHECKS
+  sec. 13) and appear as the `hbas-buttons` keyboard. The UI pages with
+  either handlebar's left/right, and HOME goes back. Run `hbas-iocd -v` to
+  log raw button bytes and confirm layout A on the first hardware run.
