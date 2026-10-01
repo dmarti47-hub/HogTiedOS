@@ -45,6 +45,7 @@
 #include <sys/socket.h>
 
 #include "lvgl.h"
+#include "hbas/dsp.h"
 #include "hbas/vehicle.h"
 #include "demo.h"
 #include "persist.h"
@@ -127,20 +128,27 @@ static void run_to(uint32_t until_ms)
 /* ---- audio backend ------------------------------------------------------ */
 
 /*
- * Until the SigmaDSP parameter map for volume/tone/fade is known (bench
- * capture, docs/findings/AUDIO.md), settings are only logged.
+ * The DSP writes for volume/fade/mute are known from static analysis
+ * (libhbas/dsp.h, docs/findings/AUDIO.md sec. 7) but not yet confirmed on
+ * hardware, and there is no DSP SPI writer yet: they are only logged.
  */
 static bool audio_log_quiet;
 
 static void log_apply(void *ctx, const struct hbas_audio_db *db, bool muted,
 		      enum hbas_audio_output out)
 {
+	struct hbas_dsp_write w[HBAS_DSP_AUDIO_WRITES];
+	size_t n = hbas_dsp_audio_writes(db, muted, out, w);
+
 	(void)ctx;
-	if (!audio_log_quiet)
-		fprintf(stderr, "audio: out=%d vol=%d dB "
-			"fade front=%d rear=%d dB%s (not sent: DSP map unknown)\n",
-			out, db->volume_db,
-			db->fade_front_db, db->fade_rear_db, muted ? " MUTED" : "");
+	if (audio_log_quiet)
+		return;
+	fprintf(stderr, "audio: out=%d vol=%d dB fade front=%d rear=%d dB%s -> %zu DSP writes:",
+		out, db->volume_db, db->fade_front_db, db->fade_rear_db, muted ? " MUTED" : "", n);
+	for (size_t i = 0; i < n; i++)
+		if (w[i].word)                     /* the rest are 0 (off) */
+			fprintf(stderr, " %u=0x%07x", w[i].addr, (unsigned)w[i].word);
+	fprintf(stderr, " (others 0; not sent)\n");
 }
 
 static void log_eq(void *ctx, const char *name)

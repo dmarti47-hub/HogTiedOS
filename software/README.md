@@ -74,8 +74,10 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
   hardware: the REQ/ACK edge polarity (both edges are used).
 - **Audio: settings only, nothing reaches the DSP yet.** The Audio page uses
   the stock ranges and step-to-dB tables, and the EQ profile follows the
-  engine; changes are logged. Which DSP writes they become is what the bench
-  capture is for (`docs/findings/AUDIO.md`). Output chooses **Stock speakers**
+  engine. Each change logs the exact DSP writes it would make (addresses and
+  words from static analysis of Harley's audio service, `libhbas/dsp.c`,
+  `docs/findings/AUDIO.md` sec. 7); they aren't sent until a DSP SPI writer
+  exists and the map is confirmed on hardware. Output chooses **Stock speakers**
   (Harley's factory EQ and volume curve) or **Custom system** (aftermarket
   speakers/amp: factory EQ bypassed, volume tops out at 0 dB so the amp gets
   a clean signal). Headset routes media to the Harley comm headset jacks.

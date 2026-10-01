@@ -7,8 +7,10 @@
  * biquads sit at DSP address 222 + 5*i, up to 7 per set. The 7-band EQ fills
  * that set, replacing stock's bass/treble (whose DSP_SET_TONE writes go to
  * this bank).
- * Open: DSP sample rate (48 kHz assumed); that all 7 slots are free for the
- * user EQ is an assumption until the bench capture of stock bass/treble.
+ * Sample rate 48 kHz: confirmed from the factory tone filters (AUDIO.md
+ * sec. 7.2). In stock these 7 slots hold bass, treble, Harley's fixed
+ * voicing filters and a speed-dependent bass boost (sec. 7.3); writing the
+ * user EQ there replaces all of them.
  */
 #ifndef HBAS_EQ_H
 #define HBAS_EQ_H
@@ -19,7 +21,7 @@
 #define HBAS_EQ_BANDS     7
 #define HBAS_EQ_MAX_DB    10        /* slider range +/-10 dB, 1 dB steps */
 #define HBAS_EQ_Q         1.05      /* ~1.33 octaves wide, matching the band spacing */
-#define HBAS_DSP_FS       48000.0   /* TODO: unconfirmed - DSP sample rate */
+#define HBAS_DSP_FS       48000.0   /* DSP sample rate, AUDIO.md sec. 7.2 */
 
 /* DSP layout (dsp_layout_map.json) */
 #define HBAS_DSP_BIQUAD_BASE    222 /* address of biquad 0 */

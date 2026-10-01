@@ -437,8 +437,55 @@
  "still_unknown": [
   "how DSP program is provided (no host download; presumably external memory/self-boot: needs physical board inspection)",
   "meaning of DSP status read at 0xE21F (cmd 0x928)",
-  "tag 0x35 bit 7, tags 0x0f/0x0e/0x61 semantics",
   "power-amp I2C device id 0x6f register map",
-  "which pin(s) truly reset the DSP vs amp (GPIO170 shared)"
- ]
+  "which pin(s) truly reset the DSP vs amp (GPIO170 shared)",
+  "tag 0x61 per-type data (knob step -> gain law), filter types 2 and 8",
+  "tags 0x0f/0x0e semantics, tag 0x35 bit 7",
+  "output-gain channels 4-9 and mute channels: assignment; per-channel fade offset (+0x203) source",
+  "DSP initial parameter state after power-up"
+ ],
+ "parameter_map_static": {
+  "source": "static analysis of audioCtrlSvc 2026-10-01, docs/findings/AUDIO.md sec. 7; not observed on hardware",
+  "gain_word": "linear, host 1.0 = 2^24, halved by 0x12b7c0 -> Q5.23 (0x00800000 = 0 dB); dB table at 0x142154 (1 dB steps, -99..+32, -100 = 0)",
+  "main_mixer1_0x92a": {
+   "addr": "295 + 16*input + output",
+   "inputs": [
+    "MEDIA_L",
+    "MEDIA_R",
+    "PHONE",
+    "NAV/VR",
+    "D_VOX",
+    "P_VOX",
+    "IN1_CBRX",
+    "BEEP",
+    "RINGTONE",
+    "TA"
+   ],
+   "outputs": [
+    "SPKRS_L",
+    "SPKRS_R",
+    "HDSTS_D_L",
+    "HDSTS_D_R",
+    "HDSTS_P_L",
+    "HDSTS_P_R",
+    "HDSTS_S_L",
+    "HDSTS_S_R"
+   ],
+   "use": "volume per source and output (harleyManager updateMainMixer1 -> setMixer)"
+  },
+  "output_gain_0x906": {
+   "addr": "1109 + ch (10 ch)",
+   "fade": "ch0-1 front, ch2-3 rear (setFade)",
+   "also": "AVC speed factor"
+  },
+  "main_mute_0x913": {
+   "addr": "1037 + ch (10 ch)",
+   "ramp": "0x914, discrete times"
+  },
+  "tone_0x907": {
+   "addr": "222 + 5*slot, slot 0-6, safe-load of 5 words",
+   "slot_source": "profile tag 0x61 records (56 B): +0 control (1 bass, 4 treble, 8 fixed, 16 speed), +4 type, +0xC slot, +0x10 tan(pi f/fs) Q1.31, +0x14 Q in Q2.14",
+   "sample_rate": "48000 (every tag-0x61 frequency is whole Hz at 48 kHz, none at 44.1 kHz)"
+  }
+ }
 }

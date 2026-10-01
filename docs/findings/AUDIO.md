@@ -3,7 +3,8 @@
 Sources: stock `PRE_CAL/cfg/audioMgr.cfg` and `audioCtrlSvc.cfg` (JSON with
 Harley's own descriptions), `usr/share/lua/service/eqService/eqService.lua`,
 `bin/audioCtrlSvc` (disassembled with `tools/re/qnxdis.py`), and
-`dsp_layout_map.json`. Nothing here has been observed on hardware.
+`dsp_layout_map.json`. Section 7 is static analysis of `audioCtrlSvc`
+(sha256 a199b880...). Nothing here has been observed on hardware.
 
 ## 1. User settings in the stock radio
 
@@ -21,9 +22,8 @@ per-source gain matching (`source_gain_matching`), mute and mode-change ramps
 (80 ms), VOX thresholds (18 steps, speed-dependent offset), sidetone levels,
 and configurable beeps.
 
-**Open:** which tone step means "flat". The curves map step N to N dB, but
-nothing says whether the HMI centre (8) is flat or 0 is. HogTiedOS uses the
-centre for now.
+(Which bass/treble step is "flat" no longer matters: HogTiedOS replaces
+bass/treble with its own EQ, sec. 4.)
 
 ## 2. Automatic EQ (eqService.lua)
 
@@ -39,27 +39,27 @@ which comes from IOC diagnostic identifiers that HogTiedOS doesn't decode yet.
 183 profile files ship (`PRE_CAL/eq/`), and `eqtool.py` validates them. Each
 config also has `<bikecfg>.conf` listing which of 4 external amplifiers exist.
 
-## 3. Stock DSP operations (audioCtrlSvc → io-audio driver devctl)
+## 3. Stock DSP operations (devctl handlers inside audioCtrlSvc)
 
-Each devctl call's error message names the operation, and the command number
-is loaded right before the call:
+audioCtrlSvc both issues these devctls and implements them: each handler
+turns its request into SPI writes on `/dev/spi0` (McSPI2). The error message
+at each call site names the operation:
 
-| Operation | devctl | dsp_layout_map table index | Used for (from the code) |
+| Operation | devctl | Layout table index → DSP address | What stock uses it for |
 |---|---|---|---|
 | `DSP_REGISTER_IO_HANDLE` | 0x901 | - | setup |
-| `DSP_LOAD_EQ` | 0x905 | features 8, 11, 13, 20, 22 | factory EQ profile |
-| `DSP_SET_OUTPUT_GAIN` | 0x906 | 12 | volume / fade (`gain_services_calc_gain`, `setFade(frontGain, rearGain)`) |
-| `DSP_SET_TONE` | 0x907 | 4 (biquad bank) | bass/treble knobs (`setTone(trebleKnob, bassKnob)`), filter updates after gain changes |
-| `DSP_SET_INPUT_GAIN` | 0x90C | 2 | source gain matching |
-| `DSP_SET_MAIN_AUDIO_MUTE` | 0x913 | 14 | mute |
+| `DSP_LOAD_EQ` | 0x905 | tables 8, 11, 13, 20, 22 | factory EQ profile |
+| `DSP_SET_OUTPUT_GAIN` | 0x906 | 12 → **1109 + ch**, 10 channels | fade (ch 0-1 front, 2-3 rear), speed-based volume (AVC) |
+| `DSP_SET_TONE` | 0x907 | 4 → **222 + 5·slot**, 7 slots, safe-load | the 7 "fixed tone" filters, incl. bass/treble (sec. 7.3) |
+| `DSP_SET_INPUT_GAIN` | 0x90C | 2 → 123 + n | source gain matching |
+| `DSP_SET_MAIN_AUDIO_MUTE` | 0x913 | 14 → **1037 + ch**, 10 channels | mute (gain words) |
+| (mute ramp rate) | 0x914 | 14 | one of 24 discrete ramp times |
 | `DSP_SET_STATIC_BIQUAD_CHAIN` | 0x925 | 19 | fixed filters |
-| `DSP_SET_DEVICE`, `DSP_SET_CLKLESS_XBAR_MIXER` | not resolved | | routing / mixer |
+| `DSP_SET_CLKLESS_XBAR_MIXER` | 0x92A | 21 → **295 + 16·input + output** | main_mixer1: **volume** per source and output (sec. 7.1) |
+| (mixer input select) | 0x92B | 21 | 10-bit mux word |
 
-Tone is therefore **computed filter coefficients**, sent through the biquad
-safe-load path (0x907): the glitch-free real-time path `PROJECT_DECISIONS.md`
-planned around. The stock code also has an **AVC level** adjustment (automatic
-volume control, i.e. speed-sensitive volume) and a built-in fallback
-`Harley_FlatEQ_withToneLoudness.EQF`, so loudness compensation exists too.
+The stock code also has an **AVC level** adjustment (speed-sensitive volume)
+and a built-in fallback `Harley_FlatEQ_withToneLoudness.EQF`.
 
 ## 4. What HogTiedOS implements now
 
@@ -75,7 +75,9 @@ volume control, i.e. speed-sensitive volume) and a built-in fallback
     curve is the stock one shifted down 16 dB (every step still changes the
     level; the top step is exactly 0 dB), and the level drops by the
     largest user-EQ boost. The amp's gain sets how loud full volume is.
-    Fade stays available.
+    Fade stays available. Harley's own config agrees: "0dB is maximum
+    recommended input into the DSP ... Values over 0 dB can cause digital
+    clipping" (audioCtrlSvc.cfg `volume_ctrl_step_curve`).
   - **Headset (Off / Driver / Passenger):** the Harley comm system's wired
     helmet jacks (`MIX1_HDST_D/P`, alongside intercom/CB, mics, sidetone and
     VOX). Media plays there when one is selected, with its own volume, the
@@ -83,19 +85,19 @@ volume control, i.e. speed-sensitive volume) and a built-in fallback
     with the phone and don't involve the head unit.
 - `hogtied-ui` EQ page + `software/libhbas/eq.c`: a **7-band** graphic EQ
   (63, 160, 400 Hz, 1, 2.5, 6.3, 16 kHz; ±10 dB; Q 1.05 for the ~1.33-octave
-  spacing) with presets, made of RBJ peaking biquads. They're encoded in the
-  verified DSP format (sec. 6) and packed into one 35-word safe-load. It's
-  the only tone control, and it **assumes all 7 biquads of the set stock's
-  bass/treble (`DSP_SET_TONE`, 0x907) write to are free** for it.
-- **Backend: logging only.** Every change produces the dB values a DSP backend
-  would apply, but nothing is sent: the parameter-level writes behind
-  0x906/0x907/0x913 aren't known yet.
+  spacing) with presets, made of RBJ peaking biquads at 48 kHz (confirmed,
+  sec. 7.2), encoded in the verified DSP format (sec. 6) and packed into one
+  35-word safe-load to the tone slots. See sec. 7.3 for what those slots
+  hold in stock.
+- `software/libhbas/dsp.c`: the exact parameter writes for volume, mute and
+  fade (sec. 7.1), with stock's dB-to-gain conversion.
+- **Backend: logging only.** Every change logs the DSP writes it would make
+  (addresses and words), but nothing is sent: there's no DSP SPI writer yet,
+  and the map hasn't been confirmed on hardware.
 
-## 5. Bench capture checklist
+## 5. Bench capture checklist (shrunk by sec. 7)
 
-Goal: turn each setting into exact SPI writes, so a Linux DSP backend can
-reproduce them. Everything else (ranges, curves, profile selection) is
-already known from the firmware.
+Goal: confirm the static map, and capture what code alone can't show.
 
 **Setup:** stock firmware, unit on the bench, logic analyzer on the DSP SPI bus
 (McSPI2: CLK, SIMO, SOMI, CS0; 6 MHz, mode 0, 8-bit, CS held for the whole
@@ -103,26 +105,18 @@ transfer) plus GPIO170 (power/reset) and GPIO102 (DSP completion input).
 Pads are known (IPL pad table: 0x21D6/0x21D8/0x21DA/0x21DC), physical test
 points aren't. Record with timestamps, and note each HMI action as it's made.
 
-| # | Do this on the stock HMI | Expect to see | Gives us |
+| # | Do this on the stock HMI | Expect (from sec. 7) | Still gives us |
 |---|---|---|---|
-| 1 | Power up, wait for audio | init writes, GPIO170 / GPIO102 timing | DSP boot/reset sequence (an open item) |
-| 2 | Volume 0 → 17, one step at a time | 0x906 writes (table 12), maybe 0x907 | volume parameter address(es) and value encoding per step |
-| 3 | Bass 0 → 16, then treble 0 → 16 | 0x907 safe-loads to biquads at 222 + 5i | coefficients per step, so we can match or tabulate them; also shows which step is flat |
-| 4 | Fade full rear → full front | 0x906 front/rear gains | fade encoding |
-| 5 | Mute / unmute | 0x913 (table 14) | mute register |
-| 6 | Start / stop engine (or replay CAN) | 0x905 profile load | confirms automatic EQ switching |
-| 7 | Speakers ↔ headset | 0x905 HS profile, routing writes | output routing writes |
-| 8 | Change source (media → phone → nav) | 0x90C, mixer writes | input gain / mixer |
-| 9 | Ride or replay speed changes | AVC-related writes | speed-sensitive volume curve |
+| 1 | Power up, wait for audio | writes to all tables; GPIO170 / GPIO102 timing | **DSP boot/reset sequence and the full initial parameter state** (the main remaining unknown: our backend must reproduce or keep it) |
+| 2 | Volume up/down a few steps | 0x92A: words at 295 and 312 = gain of the volume curve's dB | confirmation only |
+| 3 | Fade full rear → full front | 0x906: 1109-1112 | confirmation, plus whether a per-channel trim (FrontSpeakerOutputLevel / RearSpeakerOutputLevel) is folded in |
+| 4 | Mute / unmute | 0x913: 1037+ch; 0x914 ramp | which of the 10 mute channels are which (HogTiedOS mutes through the mixer instead, so this is optional) |
+| 5 | Start / stop engine | 0x905 profile load | confirms automatic EQ switching |
 
-Items 2-5 are what the Audio page needs. For the EQ page, item 3 is the
-key check on the 7-free-slots assumption: it shows which of the 7 biquads
-stock's bass/treble actually rewrite, and whether the factory profile (0x905,
-tag 0x35 slot map) also puts filters there, and the DSP sample rate (needed to compute coefficients) can be checked
-by capturing a known bass/treble step and comparing its coefficients with
-the RBJ formulas at 44.1 vs 48 kHz. Static analysis of `audioCtrlSvc`'s
-`gain_services_*` and `fixed_tone_*` routines could recover some of it before
-any capture; the capture then confirms it.
+Dropped from the list: bass/treble (coefficients, sample rate and slot use
+are all in the profiles, sec. 7.2-7.3), headset routing (mixer columns are
+known), source changes and AVC (not used by HogTiedOS yet; their code paths
+are identified).
 
 ## 6. Biquad coefficient format, verified against all factory profiles
 
@@ -138,8 +132,78 @@ So the DSP stores the feedback coefficients negated. The factory filters
 also satisfy B1 = -A1 exactly, the RBJ peaking-EQ relation (b1 = a1), which
 independently confirms eqtool's field order. Wire order to the DSP is B2 B1 B0
 A2 A1 (`dsp_layout_map.json`, biquad bank = table index 4, first biquad at
-DSP address 222, stride 5, at most 7 per set).
+DSP address 222, stride 5, at most 7 per set; the 0x907 handler confirms
+slot i → 222 + 5i, sec. 7.3).
 
-Still open: the DSP **sample rate** (coefficients depend on it; HogTiedOS
-assumes 48 kHz), and **which biquad slots** a user EQ can own without
-fighting the factory profile (tag 0x35 maps profile filters to slots).
+## 7. Static analysis of audioCtrlSvc (2026-10-01)
+
+### 7.1 Gains: volume, fade, mute
+
+- **Word format.** Every gain is linear. Host value 2^24 = 1.0; the write
+  routine (0x12b7c0) halves it, so the DSP gets **Q5.23 (0x00800000 = 0 dB)**
+  as `00 | addr_hi addr_lo | 4 bytes`, top nibble zeroed (28-bit words).
+- **dB → gain** (`gain_services_calc_gain`, 0x128bb0) is a table lookup at
+  0x142154: 10^(dB/20) in exact 1 dB steps, 0 to -99 dB and 0 to +32 dB;
+  -100 dB = 0 (off). The DSP handlers clamp to +24 dB. `floor(10^(dB/20)·2^24)`
+  reproduces the table to within 1 LSB.
+- **Volume = main_mixer1 crosspoints** (0x92A handler 0x126c44): word at
+  `295 + 16·input + output`. Inputs (rows, from the name table at 0x13de70
+  and the channel masks at 0x13df90): 0 MEDIA L, 1 MEDIA R, 2 PHONE,
+  3 NAV/VR prompts, 4 driver VOX, 5 passenger VOX, 6 CB RX, 7 BEEP,
+  8 RINGTONE, 9 TA. Outputs (columns, table at 0x13df60, expanded L/R by
+  `setMixer`): 0-1 SPKRS L/R, 2-3 HDSTS_D, 4-5 HDSTS_P, 6-7 HDSTS_S. Stereo
+  inputs go straight across (L→L, R→R). harleyManager (audioMgr) sends the
+  per-output, per-source volume as these crosspoint gains
+  (`updateMainMixer1` → `setMixer` batches; `default_volumes` is
+  [output][input]). So media to the speakers is **295 (L) and 312 (R)**.
+- **Fade = output gain** (0x906 handler 0x12a15c): word at `1109 + ch`.
+  `setFade(front, rear)` sets ch 0-1 to the front value and 2-3 to the rear
+  value (each plus a per-channel offset kept at object +0x203), clamps to
+  [-100, +24] dB, and sends 0x906. The same output gains carry the AVC speed
+  factor (`processSpeedEvent`: speed × a config factor → `gain_services`).
+  Channels 4-9 aren't driven by setFade.
+- **Main mute** (0x913 handler 0x129908): gain words at `1037 + ch`, 10
+  channels, written the same way; 0x914 sets one of the discrete ramp times
+  listed in audioCtrlSvc.cfg `mute_ramp_rate`.
+
+### 7.2 DSP sample rate: 48 kHz
+
+The tone filters are designed at runtime from the profile's tag-0x61
+records (56 bytes, the exact size `fixed_tone_load_eq` copies; it checks for
+0x38). Each holds `tan(π·f/fs)` in Q1.31 at +0x10 and Q in Q2.14 at +0x14.
+Across all 850 records in the 183 profiles (41 distinct filters), solving
+for f gives a **whole number of hertz for every one at fs = 48000** (66, 75,
+110, 1000, 1678, 4746, 5000, 7500 Hz...), and for none at 44100. 96 kHz would
+also give whole numbers, but all even (75 → 150, 83 → 166), which is
+implausible for hand-picked frequencies. **The DSP runs at 48 kHz**, as
+`HBAS_DSP_FS` assumed.
+
+### 7.3 The 7 tone slots are not free in stock
+
+Tag-0x61 record layout (big-endian): +0 control, +4 filter type, +0xC
+**slot 0-6** (→ biquad 222 + 5·slot), +0x10 tan(π f/fs), +0x14 Q, then 34
+bytes of per-type data (gain steps and breakpoints). The control says what
+drives the filter (from `fixed_tone_update_filters` 0x128764 and `setTone`):
+
+| Control | Driven by | Seen in profiles |
+|---|---|---|
+| 1 | **bass knob** (0-16) | slot 0-1, low shelf 66-124 Hz |
+| 4 | **treble knob** (0-16) | slot 1-2, high shelf 5.0-6.0 kHz |
+| 8 | **fixed** (no control) | slots 0, 2-6: 60-200 Hz, 1-2.5 kHz, 4.7-7.5 kHz, and type-8 filters (handled by a different routine, 0x128054; not decoded) |
+| 16 | **vehicle speed** (breakpoints 25/50/75/100) | slot 6: a speed-dependent 124 Hz boost |
+
+A typical speaker profile (`02_ON.bin`) uses all 7: slot 0 fixed, 1 bass,
+2 treble, 3-5 fixed, 6 speed. So these slots carry part of Harley's tuning
+(fixed voicing and speed compensation), not just bass/treble. **A 7-band
+user EQ written to all 7 slots replaces that tuning.** The per-speaker
+factory EQ (tag 0x36 bank, layout table 11) is a separate set and is
+unaffected.
+
+### 7.4 Still unknown after this pass
+
+- The DSP's initial state after power-up and how its program is provided
+  (no program download in audioCtrlSvc; bench item 1).
+- The per-channel fade offset (+0x203) and its source; output-gain channels
+  4-9 and mute channels: what each one is.
+- Tag 0x61 per-type data (the knob step → gain law), filter types 2 and 8 in
+  detail. Not needed while HogTiedOS replaces bass/treble.
