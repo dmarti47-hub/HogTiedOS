@@ -196,6 +196,7 @@ void ui_set_audio_backend(const struct hbas_audio_backend *b)
 	backend = b;
 	loaded_eq[0] = '\0';                  /* a new backend has nothing loaded */
 	ui_eq_set_backend(b);
+	load_eq();
 	apply();
 	refresh();
 }

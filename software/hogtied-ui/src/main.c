@@ -589,12 +589,14 @@ static int run_live(const struct live_opts *o)
 	signal(SIGTERM, on_stop_signal);
 	create_display(o->fbdev);
 	ui_set_speaker_count(o->speakers);
-	ui_set_audio_backend(&log_backend);
 	ui_media_set_sender(bt_send);
 	if (o->bike >= 0)
 		ui_set_bike(bike = o->bike);
 	if (o->settings)
 		persist_init(o->settings, o->settings_mount);
+	/* only now connect the audio output, so the first thing it gets is the
+	 * saved settings (no jump from the defaults at power-on) */
+	ui_set_audio_backend(&log_backend);
 	/* window closed -> display deleted; Ctrl+C / SIGTERM -> stop_requested */
 	while (!stop_requested && lv_display_get_default()) {
 		uint32_t now = tick_ms() - start;
