@@ -348,3 +348,12 @@ stock runs without `-w`, so it's disabled).
 - **ch3/ch4:** `[ID low, ID high, length, data...]` (testIpc.lua). ch4 IDs
   are CAN IDs (sec. 11).
 - **ch7:** KWP2000 `11 01` ECU reset (bootloader mode only).
+
+**SPI mode (correction to the bring-up report):** replaying the stock boot-IFS
+`spi-omap3530.so` `omap3530_cfg` in Unicorn (the board/clock/pin kit's
+harness; sanity check 0x108 @ 8 MHz reproduces its CHCONF 0x103CC) with the
+IOC's mode word **0x608 @ 1 MHz gives CHCONF 0x103DB: PHA=1, POL=1 (SPI
+mode 3)**, 8-bit words, CS active low, and the clock actually programmed
+is **750 kHz** (48 MHz / 64). The bring-up report's "mode 1" is wrong.
+(The boot-IFS and secondary copies of spi-omap3530.so differ; the boot copy
+is the one `spi-master -domap3530` uses for the IOC bus.)
