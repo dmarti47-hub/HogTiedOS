@@ -19,11 +19,18 @@ explicit go-ahead at the bench.
 - **Escalate slowly:** observe → read → one small reversible write → full
   install. Each step has a stop condition.
 - No debug port / JTAG / factory UART is assumed available. Everything here
-  works without one. If a console turns out to be exposed, great, but the
-  plan doesn't depend on it.
+  works without one. The Phase 0a teardown looks for an exposed serial/JTAG
+  footprint — if one turns up it changes the bring-up for the better, but
+  the plan doesn't depend on it.
 
 ## What we need to learn, ranked
 
+0. **Board survey.** Chip part numbers and board layout, read directly.
+   This flips the project's "no board markings" assumption: several things
+   we've refused to guess (DDR geometry, eMMC/NAND size, touch controller)
+   become datasheet lookups, and a teardown may expose a serial/JTAG
+   footprint that changes the whole bring-up. Non-destructive, so it goes
+   first.
 1. **Power & baseline boot.** How to run the unit on a bench, and that it
    boots stock cleanly there. Everything else is meaningless without a
    known-good reference.
@@ -42,6 +49,11 @@ explicit go-ahead at the bench.
 
 ## Equipment / setup to prepare beforehand
 
+- ESD strap and mat.
+- A camera that can do macro / close focus, and raking light (a phone
+  torch at a low angle) to read part numbers through any conformal coating.
+- Small driver set; a tray and labelled photos for screws and the
+  disassembly order so reassembly is clean.
 - Bench 12 V supply with **current readout** and a current limit set a bit
   above the unit's normal draw (so a fault trips the supply, not the board).
 - The vehicle harness connector pinout for this head unit: switched/ACC,
@@ -55,7 +67,47 @@ explicit go-ahead at the bench.
 - A way to read anything we write back out (the same USB stick, read on the
   PC).
 
-## Phase 0 — Power and non-destructive observation (no writes)
+## Phase 0a — Teardown and board survey (no power)
+
+Question: what is actually on the board, and is a console exposed? This is
+the one teardown; capture everything so we never have to open it again to
+answer a question we could have photographed.
+
+Handling: ESD strap on. The LCD + touch digitizer usually lifts off as an
+assembly on fragile ribbon cables — photograph each connector's position
+and orientation before unseating anything. Automotive boards often have
+conformal coating; read part numbers with raking light, never scrape.
+External photography only — nothing destructive, no decapping. Don't power
+the board while it's apart (the SoC and audio amp may need the chassis for
+their thermal path).
+
+Capture, in sharp, legible photos:
+
+1. **Every major chip's full top marking** (line by line — the whole
+   number, not just the family), for at least:
+   - SoC (confirm the DRA526 / AM35xx-family part and its revision)
+   - **DRAM** — the part number gives us DDR type, width and size, the
+     geometry we've refused to guess. Photograph every DRAM package.
+   - eMMC and the NAND that holds the IFS slots — parts → sizes
+   - CSR Bluetooth (against our PS-key / build-ID assumptions)
+   - u-blox GPS module
+   - SigmaDSP (against our register map) and the audio codec/amp on McBSP4
+   - PMIC (matters for safe bench power sequencing)
+   - the EEPROM (holds `touchCal` and the BD_ADDR)
+   - **the touch controller** — reading this answers the touch unknown
+     outright
+2. **Unpopulated footprints and test points.** Look hard near the SoC for a
+   3–4 pin header (UART: TX/RX/GND, maybe VCC) and a TI JTAG/cJTAG footprint
+   (14/20 pin), and for labelled test pads. Photograph silkscreen labels.
+   A usable serial console here would change the whole bring-up — flag it.
+3. **The main harness connector**, and trace which pins reach the PMIC /
+   power input. This is how we get the Phase 0b power pinout safely.
+4. **Overall board, both sides**, and the disassembly order as you go.
+
+Deliverable: a labelled set of photos and a parts list (chip → part number
+→ what it tells us). This feeds straight into `docs/findings/`.
+
+## Phase 0b — Power and non-destructive observation (no writes)
 
 Question: does it run and boot stock on the bench, and what interfaces are
 live?
