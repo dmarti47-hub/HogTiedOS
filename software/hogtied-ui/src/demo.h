@@ -19,4 +19,7 @@ struct can_frame_lite {
  */
 size_t demo_frames(uint32_t t_ms, struct can_frame_lite *out, size_t max);
 
+/* Make the demo bike report itself as a trike (third tire, BODY_CTRL_DATA2). */
+void demo_set_trike(int trike);
+
 #endif

@@ -34,6 +34,8 @@ static lv_obj_t *lbl_clock, *lbl_ambient, *lbl_ign;
 static lv_obj_t *ind_engine, *ind_oil, *ind_fuel, *ind_temp;
 /* Tires */
 static lv_obj_t *lbl_tire[HBAS_TIRE_COUNT], *lbl_tpms_state;
+static lv_obj_t *tire_panel[HBAS_TIRE_COUNT], *lbl_tire_name[HBAS_TIRE_COUNT];
+static bool tires_trike;
 /* System */
 static lv_obj_t *lbl_sys;
 
@@ -141,6 +143,31 @@ static void build_dash(lv_obj_t *p)
 	lv_obj_align(lbl_clock, LV_ALIGN_TOP_RIGHT, -12, 4);
 }
 
+/*
+ * Tire panels. Stock names the fields F, R_or_RR and LR: a motorcycle has
+ * front + rear; a trike (BODY_CTRL_DATA2 trike bit) has front, right rear
+ * and left rear. The layout follows the bike's own trike flag.
+ */
+static void tires_layout(bool trike)
+{
+	if (trike) {
+		for (int i = 0; i < HBAS_TIRE_COUNT; i++) {
+			lv_obj_set_pos(tire_panel[i], 10 + i * 128, 40);
+			lv_obj_set_width(tire_panel[i], 120);
+		}
+		lv_label_set_text(lbl_tire_name[HBAS_TIRE_REAR], "RIGHT REAR");
+		lv_obj_remove_flag(tire_panel[HBAS_TIRE_LEFT_REAR], LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_set_pos(tire_panel[HBAS_TIRE_FRONT], 10, 40);
+		lv_obj_set_pos(tire_panel[HBAS_TIRE_REAR], 205, 40);
+		lv_obj_set_width(tire_panel[HBAS_TIRE_FRONT], 185);
+		lv_obj_set_width(tire_panel[HBAS_TIRE_REAR], 185);
+		lv_label_set_text(lbl_tire_name[HBAS_TIRE_REAR], "REAR");
+		lv_obj_add_flag(tire_panel[HBAS_TIRE_LEFT_REAR], LV_OBJ_FLAG_HIDDEN);
+	}
+	tires_trike = trike;
+}
+
 static void build_tires(lv_obj_t *p)
 {
 	static const char *const names[HBAS_TIRE_COUNT] = { "FRONT", "REAR", "LEFT REAR" };
@@ -149,6 +176,8 @@ static void build_tires(lv_obj_t *p)
 		lv_obj_t *pn = panel(p, 10 + i * 128, 40, 120, 120);
 		lv_obj_t *t = label(pn, &lv_font_montserrat_14, COL_DIM, names[i]);
 
+		tire_panel[i] = pn;
+		lbl_tire_name[i] = t;
 		lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 8);
 		lbl_tire[i] = label(pn, &lv_font_montserrat_20, COL_TEXT, "--");
 		lv_obj_set_style_text_align(lbl_tire[i], LV_TEXT_ALIGN_CENTER, 0);
@@ -159,6 +188,7 @@ static void build_tires(lv_obj_t *p)
 	lv_obj_t *note = label(p, &lv_font_montserrat_14, COL_DIM,
 			       "Raw bike values (P / T): units not yet confirmed");
 	lv_obj_set_pos(note, 12, 196);
+	tires_layout(false);            /* motorcycle until the bike says trike */
 }
 
 static void build_system(lv_obj_t *p)
@@ -260,6 +290,8 @@ void ui_update(const struct hbas_vehicle *v)
 	indicator_set(ind_fuel, v->low_fuel, COL_WARN);
 	indicator_set(ind_temp, v->overtemp, COL_ALARM);
 
+	if ((v->seen & HBAS_SEEN_BODY2) && v->tpms.trike != tires_trike)
+		tires_layout(v->tpms.trike);
 	for (int i = 0; i < HBAS_TIRE_COUNT; i++) {
 		fmt_tire(buf, sizeof(buf), v->tpms.pressure_raw[i], v->tpms.temp_raw[i]);
 		lv_label_set_text(lbl_tire[i], buf);

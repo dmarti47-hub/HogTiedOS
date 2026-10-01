@@ -3,6 +3,10 @@
 
 #include "hbas/vehicle.h"
 
+static int trike;
+
+void demo_set_trike(int t) { trike = t; }
+
 static void put16(uint8_t *p, unsigned v) { p[0] = v >> 8; p[1] = v & 0xFF; }
 
 static void frame(struct can_frame_lite *f, uint16_t id)
@@ -85,8 +89,9 @@ size_t demo_frames(uint32_t t, struct can_frame_lite *out, size_t max)
 	if (max > n) {
 		frame(&out[n], HBAS_ID_BODY_CTRL_DATA2);    /* TPMS */
 		out[n].data[0] = 0x80;
-		out[n].data[2] = 32; out[n].data[3] = 34; out[n].data[4] = HBAS_U8_NOVAL;
-		out[n].data[5] = 36; out[n].data[6] = 40; out[n].data[7] = HBAS_U8_NOVAL;
+		out[n].data[1] = trike ? 0x01 : 0x00;
+		out[n].data[2] = 32; out[n].data[3] = 34; out[n].data[4] = trike ? 33 : HBAS_U8_NOVAL;
+		out[n].data[5] = 36; out[n].data[6] = 40; out[n].data[7] = trike ? 39 : HBAS_U8_NOVAL;
 		n++;
 	}
 	return n;

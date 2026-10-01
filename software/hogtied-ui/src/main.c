@@ -127,6 +127,8 @@ static int snapshot(const char *prefix)
 		{ 22100, UI_KEY_RIGHT, true, "04-tires" },
 		{ 22200, UI_KEY_RIGHT, true, "05-system" },
 		{ 22300, UI_KEY_BACK, true, "06-back-to-dash" },
+		/* same bike reporting itself as a trike: third tire appears */
+		{ 22400, UI_KEY_RIGHT, true, "07-tires-trike" },
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
 	char path[512];
@@ -136,6 +138,8 @@ static int snapshot(const char *prefix)
 	lv_display_set_flush_cb(d, snap_flush);
 	ui_create();
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
+		if (!strcmp(script[i].name, "07-tires-trike"))
+			demo_set_trike(1);
 		run_to(script[i].t);
 		if (script[i].press)
 			ui_key(script[i].key);
