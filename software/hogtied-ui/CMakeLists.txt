@@ -5,6 +5,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 
 option(HOGTIED_FBDEV "Build the Linux framebuffer backend (target)" OFF)
+option(HOGTIED_SDL "Build the desktop window backend (PC, needs libsdl2-dev)" OFF)
+if(HOGTIED_FBDEV AND HOGTIED_SDL)
+  message(FATAL_ERROR "Pick one backend: HOGTIED_FBDEV or HOGTIED_SDL")
+endif()
 set(LVGL_DIR "" CACHE PATH "Path to an LVGL v9.2.2 source tree")
 
 if(NOT LVGL_DIR)
@@ -23,6 +27,17 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LVGL_DIR} lvgl EXCLUDE_FROM_ALL)
 if(HOGTIED_FBDEV)
   target_compile_definitions(lvgl PUBLIC HOGTIED_FBDEV)
+endif()
+if(HOGTIED_SDL)
+  if(NOT SDL2_LIBRARIES)            # normally from pkg-config; can be preset
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SDL2 REQUIRED sdl2)
+    # full paths: plain SDL2_LIBRARIES is just "SDL2" without its -L dir
+    set(SDL2_LIBRARIES ${SDL2_LINK_LIBRARIES})
+  endif()
+  target_compile_definitions(lvgl PUBLIC HOGTIED_SDL)
+  target_include_directories(lvgl PUBLIC ${SDL2_INCLUDE_DIRS})
+  target_link_libraries(lvgl PUBLIC ${SDL2_LIBRARIES})
 endif()
 
 set(HBAS_TESTS OFF CACHE BOOL "" FORCE)

@@ -10,26 +10,48 @@ Both are built into the image by Buildroot (`buildroot-external/package/hogtied-
 
 ![Demo ride rendered offline](../docs/screenshots/ui-demo.png)
 
-## Developing on a PC
+## Running the screen on your PC
+
+One-time setup (Ubuntu / Debian / Pop!_OS):
 
 ```sh
-# decoder unit tests
-cmake -S software/libhbas -B build/hbas && cmake --build build/hbas && (cd build/hbas && ctest)
-
-# UI: needs an LVGL v9.2.2 source tree
-curl -L https://github.com/lvgl/lvgl/archive/refs/tags/v9.2.2.tar.gz | tar xz
-cmake -S software/hogtied-ui -B build/ui -DLVGL_DIR=$PWD/lvgl-9.2.2 && cmake --build build/ui
-build/ui/hogtied-ui --snapshot shot      # writes shot-*.bmp from a scripted demo ride
+sudo apt install build-essential cmake pkg-config curl libsdl2-dev
 ```
 
-`--snapshot` runs a built-in demo ride on a virtual clock and saves screenshots,
-so no display is needed. Built with `-DHOGTIED_FBDEV=ON`, it drives
-`/dev/fb0` instead:
+Then, from the repository folder:
 
-- `--demo`: the scripted ride. **Never use this on a bike.** It shows fake data.
-- `--replay FILE`: lines like `541#0BB803E800000300` (candump -L style)
-- `--can vcan0`: live frames from Linux SocketCAN (a `vcan` interface on a PC)
-- `--stdin-keys`: `a`/`d` change pages, `q` goes back (e.g. over the UART console)
+```sh
+software/run-ui-on-pc.sh
+```
+
+The first run downloads LVGL and builds (a minute or two); later runs start
+right away. A window opens with the screen at 2x size, playing a demo ride.
+
+| Key | Does |
+|---|---|
+| Left / Right arrows | change page (Dash, Tires, System) |
+| Esc | back to Dash |
+| close the window, or Ctrl+C in the terminal | quit |
+
+Other data sources: `software/run-ui-on-pc.sh --replay FILE` (lines like
+`541#0BB803E800000300`, candump -L style) or `--can vcan0` (live Linux
+SocketCAN). **Never run `--demo` on a bike**: it shows fake data.
+
+## Developer builds
+
+```sh
+# decoder/protocol unit tests
+cmake -S software/libhbas -B build/hbas && cmake --build build/hbas && (cd build/hbas && ctest)
+
+# offline screenshots (no display needed): writes shot-*.bmp from the demo ride
+cmake -S software/hogtied-ui -B build/ui -DLVGL_DIR=$PWD/build/lvgl-9.2.2 && cmake --build build/ui
+build/ui/hogtied-ui --snapshot shot
+```
+
+Backends: `-DHOGTIED_SDL=ON` desktop window, `-DHOGTIED_FBDEV=ON` Linux
+framebuffer (what the head unit uses), neither = snapshot only. On the unit,
+buttons arrive from hbas-iocd as the `hbas-buttons` input device;
+`--stdin-keys` also accepts a/d/w/s/Enter/q from a terminal.
 
 ## What's real and what isn't yet
 

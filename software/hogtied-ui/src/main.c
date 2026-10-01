@@ -11,7 +11,8 @@
  *
  * Output:
  *   default           Linux framebuffer (/dev/fb0, or --fb DEV), when built
- *                     with HOGTIED_FBDEV
+ *                     with HOGTIED_FBDEV; a desktop window (2x size, keys:
+ *                     arrows, Enter, Esc) when built with HOGTIED_SDL
  *   --snapshot PREFIX offline: run the demo on a virtual clock and write
  *                     PREFIX-<name>.bmp screenshots, no display needed
  *
@@ -22,6 +23,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -274,18 +276,84 @@ static void poll_keys(void)
 	}
 }
 
+#if defined(HOGTIED_FBDEV) || defined(HOGTIED_SDL)
+static volatile sig_atomic_t stop_requested;
+
+static void on_stop_signal(int sig)
+{
+	(void)sig;
+	stop_requested = 1;
+}
+#endif
+
+#if defined(HOGTIED_SDL)
+/*
+ * LVGL 9.2's SDL driver handles SDL_QUIT by calling SDL_Quit() and then
+ * lv_deinit(), which crashes (segfault on Ctrl+C, found in testing). SDL
+ * raises SDL_QUIT on SIGINT/SIGTERM and when the last window closes, so keep
+ * it from doing either: we stop on our own signal flag, and closing the
+ * window deletes the display, which ends the main loop.
+ */
+static void sdl_no_quit_event(void)
+{
+	setenv("SDL_NO_SIGNAL_HANDLERS", "1", 1);
+	setenv("SDL_QUIT_ON_LAST_WINDOW_CLOSE", "0", 1);
+}
+
+/* PC window: arrow keys, Enter and Esc drive the UI like the handlebars. */
+static void window_key_cb(lv_event_t *e)
+{
+	switch (lv_event_get_key(e)) {
+	case LV_KEY_LEFT: ui_key(UI_KEY_LEFT); break;
+	case LV_KEY_RIGHT: ui_key(UI_KEY_RIGHT); break;
+	case LV_KEY_UP: ui_key(UI_KEY_UP); break;
+	case LV_KEY_DOWN: ui_key(UI_KEY_DOWN); break;
+	case LV_KEY_ENTER: ui_key(UI_KEY_ENTER); break;
+	case LV_KEY_ESC: case LV_KEY_BACKSPACE: ui_key(UI_KEY_BACK); break;
+	default: break;
+	}
+}
+
+static lv_display_t *create_display(const char *fbdev)
+{
+	lv_display_t *d = lv_sdl_window_create(UI_WIDTH, UI_HEIGHT);
+	lv_indev_t *kb = lv_sdl_keyboard_create();
+	lv_group_t *g = lv_group_create();
+	lv_obj_t *catcher;
+
+	(void)fbdev;
+	lv_sdl_window_set_zoom(d, 2);       /* 400x240 is tiny on a PC monitor */
+	ui_create();
+	/* an invisible focused object receives the keyboard's key events */
+	catcher = lv_obj_create(lv_layer_top());
+	lv_obj_set_size(catcher, 1, 1);
+	lv_obj_set_style_opa(catcher, LV_OPA_TRANSP, 0);
+	lv_obj_add_event_cb(catcher, window_key_cb, LV_EVENT_KEY, NULL);
+	lv_group_add_obj(g, catcher);
+	lv_indev_set_group(kb, g);
+	return d;
+}
+#elif defined(HOGTIED_FBDEV)
+static lv_display_t *create_display(const char *fbdev)
+{
+	lv_display_t *d = lv_linux_fbdev_create();
+
+	lv_linux_fbdev_set_file(d, fbdev);
+	ui_create();
+	return d;
+}
+#endif
+
 static int run_live(const char *fbdev, bool demo, const char *replay, const char *can,
 		    bool stdin_keys)
 {
-#ifdef HOGTIED_FBDEV
-	lv_display_t *d = lv_linux_fbdev_create();
+#if defined(HOGTIED_FBDEV) || defined(HOGTIED_SDL)
 	FILE *rf = NULL;
 	int cs = -1, buttons = -1;
 	uint32_t start = tick_ms(), next_replay = 0, next_button_scan = 0;
 	struct can_frame_lite frames[16];
 	char line[256];
 
-	lv_linux_fbdev_set_file(d, fbdev);
 	if (replay && !(rf = fopen(replay, "r"))) {
 		perror(replay);
 		return 1;
@@ -296,8 +364,11 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 	}
 	if (stdin_keys)
 		fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
-	ui_create();
-	for (;;) {
+	signal(SIGINT, on_stop_signal);
+	signal(SIGTERM, on_stop_signal);
+	create_display(fbdev);
+	/* window closed -> display deleted; Ctrl+C / SIGTERM -> stop_requested */
+	while (!stop_requested && lv_display_get_default()) {
 		uint32_t now = tick_ms() - start;
 
 		/* hbas-iocd may create the button device after we start */
@@ -326,6 +397,7 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 		ui_update(&vehicle);
 		usleep(lv_timer_handler() * 1000);
 	}
+	return 0;
 #else
 	(void)fbdev; (void)demo; (void)replay; (void)can; (void)stdin_keys;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
@@ -361,6 +433,9 @@ int main(int argc, char **argv)
 	}
 	hbas_vehicle_init(&vehicle);
 	use_virtual_clock = snap != NULL;
+#if defined(HOGTIED_SDL)
+	sdl_no_quit_event();                    /* before SDL is initialised */
+#endif
 	lv_init();
 	lv_tick_set_cb(tick_ms);
 	return snap ? snapshot(snap) : run_live(fbdev, demo, replay, can, stdin_keys);

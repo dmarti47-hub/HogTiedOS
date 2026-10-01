@@ -13,3 +13,6 @@ firmware/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Local PC builds (software/run-ui-on-pc.sh)
+build/

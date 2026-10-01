@@ -23,6 +23,14 @@
 #define LV_USE_LINUX_FBDEV    1
 #endif
 
+/* PC desktop window backend (-DHOGTIED_SDL=ON) */
+#ifdef HOGTIED_SDL
+#define LV_USE_SDL            1
+#define LV_SDL_INCLUDE_PATH   <SDL2/SDL.h>
+#define LV_SDL_RENDER_MODE    LV_DISPLAY_RENDER_MODE_DIRECT
+#define LV_SDL_BUF_COUNT      1
+#endif
+
 #define LV_BUILD_EXAMPLES     0
 #define LV_USE_DEMO_WIDGETS   0
 
