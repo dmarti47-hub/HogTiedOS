@@ -143,11 +143,26 @@
 	status = "okay";
 };
 
-/* [confirmed] UART2 0x4806C000 IRQ 73 - u-blox GPS. 9600 -> PUBX,41 -> 57600.
- * GPS reset is GPIO112 (gpio4 bit 16).
- * TODO: unconfirmed - reset polarity; not declared here. */
+/* [confirmed] UART2 0x4806C000 IRQ 73 - u-blox GPS (ttyS1). Stock boot.sh:
+ * 9600 baud, then $PUBX,41 -> 57600; hbas-gpsd does the same and checks.
+ * No flow control (stock devc-seromap -F). */
 &uart2 {
 	status = "okay";
+};
+
+/*
+ * [confirmed] GPS reset: GPIO112 (gpio4 line 16), pad 0x220C mode 4.
+ * Stock gpio-harley.conf: "output, GPSReset, 112, invert No, init yes,
+ * initval 0" - driven low at boot, and the receiver runs with it there.
+ * [inferred] So low = running, high = reset. Held low here, as stock does.
+ */
+&gpio4 {
+	gps-reset-hog {
+		gpio-hog;
+		gpios = <16 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "gps-reset";
+	};
 };
 
 /* [confirmed] UART3 0x49020000 IRQ 74 - debug console */

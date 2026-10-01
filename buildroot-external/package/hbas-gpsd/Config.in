@@ -1,0 +1,7 @@
+config BR2_PACKAGE_HBAS_GPSD
+	bool "hbas-gpsd"
+	help
+	  u-blox GPS reader for hogtied-ui: finds the receiver's baud rate
+	  (stock's 9600 -> PUBX,41 -> 57600 first), parses NMEA, serves the
+	  fix on /run/hbas/gps.sock and sets the system clock from GPS time.
+	  Sources live in software/gpsd in the HogTiedOS repository.

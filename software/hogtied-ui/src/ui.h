@@ -4,6 +4,7 @@
 
 #include "hbas/audio.h"
 #include "hbas/btproto.h"
+#include "hbas/gpsproto.h"
 #include "hbas/vehicle.h"
 
 #define UI_WIDTH  400     /* premium panel, CROSS_CHECKS.md sec. 7 */
@@ -12,7 +13,8 @@
 /* Navigation keys: handlebars (via hbas-iocd), PC arrow keys, or stdin. */
 enum ui_key { UI_KEY_LEFT, UI_KEY_RIGHT, UI_KEY_UP, UI_KEY_DOWN, UI_KEY_ENTER, UI_KEY_BACK };
 
-enum ui_page { UI_PAGE_DASH, UI_PAGE_MEDIA, UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_TIRES, UI_PAGE_SYSTEM, UI_PAGE_COUNT };
+enum ui_page { UI_PAGE_DASH, UI_PAGE_MEDIA, UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_TIRES, UI_PAGE_GPS,
+	       UI_PAGE_SYSTEM, UI_PAGE_COUNT };
 
 void ui_create(void);
 void ui_update(const struct hbas_vehicle *v);
@@ -67,6 +69,11 @@ void ui_media_update(const struct hbas_bt_state *s);
 void ui_media_tick(void);                    /* progress bar, toasts */
 bool ui_media_key(enum ui_key key);
 bool ui_media_pairing_key(enum ui_key key);  /* pairing box takes keys on any page */
+
+/* GPS page: hbas-gpsd's view of the u-blox receiver (gpsproto.h). */
+void ui_gps_build(lv_obj_t *page);
+void ui_gps_update(const struct hbas_gps_view *v);
+void ui_gps_set_metric(bool metric);         /* follows the bike's unit setting */
 
 void ui_eq_build(lv_obj_t *page);
 void ui_eq_set_backend(const struct hbas_audio_backend *b);

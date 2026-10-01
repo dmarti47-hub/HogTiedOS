@@ -217,12 +217,14 @@ void ui_create(void)
 	pages[UI_PAGE_AUDIO] = page_create(scr, "AUDIO");
 	pages[UI_PAGE_EQ] = page_create(scr, "EQ");
 	pages[UI_PAGE_TIRES] = page_create(scr, "TIRES");
+	pages[UI_PAGE_GPS] = page_create(scr, "GPS");
 	pages[UI_PAGE_SYSTEM] = page_create(scr, "SYSTEM");
 	build_dash(pages[UI_PAGE_DASH]);
 	ui_media_build(pages[UI_PAGE_MEDIA]);
 	ui_audio_build(pages[UI_PAGE_AUDIO]);
 	ui_eq_build(pages[UI_PAGE_EQ]);
 	build_tires(pages[UI_PAGE_TIRES]);
+	ui_gps_build(pages[UI_PAGE_GPS]);
 	build_system(pages[UI_PAGE_SYSTEM]);
 
 	for (int i = 0; i < UI_PAGE_COUNT; i++) {
@@ -267,6 +269,7 @@ void ui_update(const struct hbas_vehicle *v)
 	else
 		lv_label_set_text(lbl_speed, "--");
 	lv_label_set_text(lbl_speed_unit, v->metric ? "km/h" : "mph");
+	ui_gps_set_metric(v->metric);
 
 	if (v->seen & HBAS_SEEN_ENG2) {
 		/* Gear value meanings aren't defined in stock code; show the number. */

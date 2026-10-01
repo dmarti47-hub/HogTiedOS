@@ -23,6 +23,8 @@
  *
  * Phone music (Media page): hbas-btd's socket, /run/hbas/bt.sock, or
  * --bt-socket PATH (PC window build default: $XDG_RUNTIME_DIR/hbas-bt.sock).
+ * GPS page: hbas-gpsd's socket, /run/hbas/gps.sock or --gps-socket PATH
+ * (PC window build default: $XDG_RUNTIME_DIR/hbas-gps.sock).
  *
  * Settings (volume, output, EQ, ...) are remembered:
  *   --settings FILE   where to keep them; default on a PC window build:
@@ -55,6 +57,7 @@
 
 #include "lvgl.h"
 #include "hbas/dsp.h"
+#include "hbas/gpsproto.h"
 #include "hbas/vehicle.h"
 #include "demo.h"
 #include "persist.h"
@@ -79,18 +82,77 @@ static void feed(const struct can_frame_lite *f)
 	hbas_vehicle_decode(&vehicle, f->id, f->data, f->len);
 }
 
-/* ---- hbas-btd client (Media page) ---------------------------------------- */
+/* ---- daemon clients: hbas-btd (Media page), hbas-gpsd (GPS page) -------- */
 
-static struct hbas_bt_state bt_state;
-static int bt_fd = -1;
-static char bt_in[HBAS_BT_LINE_MAX];
-static size_t bt_len;
+/*
+ * A line-oriented Unix-socket client that reconnects whenever its daemon
+ * (re)appears: on_line gets each line, on_link(true/false) connection changes.
+ */
+struct line_client {
+	const char *path;
+	int fd;
+	char in[HBAS_GPS_LINE_MAX];
+	size_t len;
+	uint32_t next_try;
+	void (*on_line)(const char *line);
+	void (*on_link)(bool up);
+};
 
-static void bt_send(const char *line)
+static void lc_down(struct line_client *c)
 {
-	if (bt_fd >= 0 && send(bt_fd, line, strlen(line), MSG_NOSIGNAL) < 0)
-		fprintf(stderr, "bt: send failed: %s\n", strerror(errno));
+	if (c->fd >= 0)
+		close(c->fd);
+	c->fd = -1;
+	c->len = 0;
+	c->on_link(false);
 }
+
+static void lc_poll(struct line_client *c, uint32_t now)
+{
+	char *nl;
+	ssize_t r = -1;
+
+	if (c->fd < 0 && c->path && now >= c->next_try) {
+		struct sockaddr_un a = { .sun_family = AF_UNIX };
+		int s;
+
+		c->next_try = now + 2000;
+		if (strlen(c->path) >= sizeof(a.sun_path))
+			return;
+		strcpy(a.sun_path, c->path);
+		if ((s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0)) < 0)
+			return;
+		if (connect(s, (struct sockaddr *)&a, sizeof(a))) {
+			close(s);
+			return;
+		}
+		fcntl(s, F_SETFL, O_NONBLOCK);
+		c->fd = s;
+		c->on_link(true);
+	}
+	while (c->fd >= 0 && (r = recv(c->fd, c->in + c->len, sizeof(c->in) - 1 - c->len, 0)) != 0) {
+		if (r < 0) {
+			if (errno != EAGAIN && errno != EWOULDBLOCK)
+				lc_down(c);
+			return;
+		}
+		c->len += (size_t)r;
+		c->in[c->len] = '\0';
+		while ((nl = strchr(c->in, '\n'))) {
+			*nl = '\0';
+			c->on_line(c->in);
+			c->len -= (size_t)(nl + 1 - c->in);
+			memmove(c->in, nl + 1, c->len + 1);
+		}
+		if (c->len >= sizeof(c->in) - 1)
+			c->len = 0;
+	}
+	if (c->fd >= 0 && r == 0)
+		lc_down(c);                         /* daemon went away */
+}
+
+/* Media page */
+static struct hbas_bt_state bt_state;
 
 static void bt_feed_line(const char *line)
 {
@@ -100,62 +162,38 @@ static void bt_feed_line(const char *line)
 		ui_media_update(&bt_state);
 }
 
-static void bt_disconnected(void)
+static void bt_link(bool up)
 {
-	if (bt_fd >= 0)
-		close(bt_fd);
-	bt_fd = -1;
-	bt_len = 0;
-	hbas_bt_state_init(&bt_state);          /* daemon = false */
+	hbas_bt_state_init(&bt_state);
+	bt_state.daemon = up;
 	ui_media_update(&bt_state);
 }
 
-static void bt_connect(const char *path)
-{
-	struct sockaddr_un a = { .sun_family = AF_UNIX };
-	int s;
+static struct line_client bt_client = { .fd = -1, .on_line = bt_feed_line, .on_link = bt_link };
 
-	if (strlen(path) >= sizeof(a.sun_path))
-		return;
-	strcpy(a.sun_path, path);
-	s = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-	if (s < 0)
-		return;
-	if (connect(s, (struct sockaddr *)&a, sizeof(a))) {
-		close(s);
-		return;
-	}
-	fcntl(s, F_SETFL, O_NONBLOCK);
-	bt_fd = s;
-	bt_state.daemon = true;
-	ui_media_update(&bt_state);
+static void bt_send(const char *line)
+{
+	if (bt_client.fd >= 0 && send(bt_client.fd, line, strlen(line), MSG_NOSIGNAL) < 0)
+		fprintf(stderr, "bt: send failed: %s\n", strerror(errno));
 }
 
-static void bt_poll(void)
-{
-	char *nl;
-	ssize_t r;
+/* GPS page */
+static struct hbas_gps_view gps_view;
 
-	while (bt_fd >= 0 && (r = recv(bt_fd, bt_in + bt_len, sizeof(bt_in) - 1 - bt_len, 0)) != 0) {
-		if (r < 0) {
-			if (errno != EAGAIN && errno != EWOULDBLOCK)
-				bt_disconnected();
-			return;
-		}
-		bt_len += (size_t)r;
-		bt_in[bt_len] = '\0';
-		while ((nl = strchr(bt_in, '\n'))) {
-			*nl = '\0';
-			bt_feed_line(bt_in);
-			bt_len -= (size_t)(nl + 1 - bt_in);
-			memmove(bt_in, nl + 1, bt_len + 1);
-		}
-		if (bt_len >= sizeof(bt_in) - 1)
-			bt_len = 0;
-	}
-	if (bt_fd >= 0 && r == 0)
-		bt_disconnected();                  /* daemon went away */
+static void gps_feed_line(const char *line)
+{
+	if (hbas_gps_view_apply(&gps_view, line))
+		ui_gps_update(&gps_view);
 }
+
+static void gps_link(bool up)
+{
+	hbas_gps_view_init(&gps_view);
+	gps_view.daemon = up;
+	ui_gps_update(&gps_view);
+}
+
+static struct line_client gps_client = { .fd = -1, .on_line = gps_feed_line, .on_link = gps_link };
 
 /* ---- offline snapshot backend ------------------------------------------ */
 
@@ -305,6 +343,7 @@ static int snapshot(const char *prefix)
 		{ 22500, "DDD", "08-eq-preset-highway" },          /* Harley -> Bass -> Vocal -> Highway */
 		{ 22600, "ERRRUUU", "09-eq-adjust-1k" },           /* 1 kHz band +3 -> Custom */
 		{ 22700, "ER", "10-tires" },
+		{ 22750, "R", "10b-gps" },                         /* demo fix */
 		{ 22800, "R", "11-system" },
 		{ 22900, "B", "12-back-to-dash" },
 		/* same bike reporting itself as a trike: third tire appears */
@@ -330,6 +369,11 @@ static int snapshot(const char *prefix)
 	bt_feed_line("track title=\"Born to Be Wild\" artist=Steppenwolf album=Steppenwolf "
 		     "duration=210000");
 	bt_feed_line("play status=playing position=64000");
+	/* demo GPS fix (Milwaukee), as hbas-gpsd would report it */
+	gps_link(true);
+	gps_feed_line("gps link=1 valid=1 fix=3d quality=1 lat=43.038902 lon=-87.906474 "
+		      "speed=88.5 course=272.0 alt=181.0 used=9 view=12 hdop=0.8 time=1790885730 "
+		      "sats=\"12:47 5:45 25:44 2:41 29:38 15:33 18:29 21:22 31:-1\"");
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
 		if (!strcmp(script[i].name, "13-tires-trike"))
 			demo_set_trike(1);
@@ -544,6 +588,7 @@ static lv_display_t *create_display(const char *fbdev)
 
 struct live_opts {
 	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file, *bt_socket;
+	const char *gps_socket;
 	bool demo, stdin_keys;
 	int speakers, bike;
 };
@@ -570,7 +615,6 @@ static int run_live(const struct live_opts *o)
 	FILE *rf = NULL;
 	int cs = -1, buttons = -1;
 	uint32_t start = tick_ms(), next_replay = 0, next_button_scan = 0, next_bike_check = 0;
-	uint32_t next_bt_connect = 0;
 	int bike = -1;
 	struct can_frame_lite frames[16];
 	char line[256];
@@ -590,6 +634,8 @@ static int run_live(const struct live_opts *o)
 	create_display(o->fbdev);
 	ui_set_speaker_count(o->speakers);
 	ui_media_set_sender(bt_send);
+	bt_client.path = o->bt_socket;
+	gps_client.path = o->gps_socket;
 	if (o->bike >= 0)
 		ui_set_bike(bike = o->bike);
 	if (o->settings)
@@ -608,12 +654,9 @@ static int run_live(const struct live_opts *o)
 		}
 		if (buttons >= 0)
 			poll_buttons(buttons);
-		/* hbas-btd may start after us, or restart */
-		if (bt_fd < 0 && o->bt_socket && now >= next_bt_connect) {
-			bt_connect(o->bt_socket);
-			next_bt_connect = now + 2000;
-		}
-		bt_poll();
+		/* hbas-btd / hbas-gpsd may start after us, or restart */
+		lc_poll(&bt_client, now);
+		lc_poll(&gps_client, now);
 		ui_media_tick();
 		/* the IOC sends the bike configuration once, at startup */
 		if (o->bike < 0 && now >= next_bike_check) {
@@ -650,8 +693,8 @@ static int run_live(const struct live_opts *o)
 #else
 	(void)o;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
-	(void)open_buttons; (void)poll_buttons; (void)read_bike_file; (void)bt_connect;
-	(void)bt_poll; (void)bt_send;
+	(void)open_buttons; (void)poll_buttons; (void)read_bike_file; (void)lc_poll;
+	(void)bt_send; (void)gps_client;
 	fprintf(stderr, "built without a display backend; use --snapshot\n");
 	return 1;
 #endif
@@ -660,8 +703,9 @@ static int run_live(const struct live_opts *o)
 int main(int argc, char **argv)
 {
 	struct live_opts o = { .fbdev = "/dev/fb0", .speakers = 4, .bike = -1,
-				.bike_file = "/run/hbas/bike", .bt_socket = "/run/hbas/bt.sock" };
-	static char default_bt[256];
+				.bike_file = "/run/hbas/bike", .bt_socket = "/run/hbas/bt.sock",
+				.gps_socket = "/run/hbas/gps.sock" };
+	static char default_bt[256], default_gps[256];
 	const char *snap = NULL;
 	static char default_settings[512];
 
@@ -684,6 +728,8 @@ int main(int argc, char **argv)
 			o.bike = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--bt-socket") && i + 1 < argc)
 			o.bt_socket = argv[++i];
+		else if (!strcmp(argv[i], "--gps-socket") && i + 1 < argc)
+			o.gps_socket = argv[++i];
 		else if (!strcmp(argv[i], "--bike-file") && i + 1 < argc)
 			o.bike_file = argv[++i];
 		else if (!strcmp(argv[i], "--settings") && i + 1 < argc)
@@ -693,7 +739,7 @@ int main(int argc, char **argv)
 		else {
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
 				"[--fb DEV] [--stdin-keys] [--speakers 2|4] [--bike N | --bike-file F]\n"
-				"       [--bt-socket PATH]\n"
+				"       [--bt-socket PATH] [--gps-socket PATH]\n"
 				"       [--settings FILE [--settings-mount DIR]] | --snapshot PREFIX\n",
 				argv[0]);
 			return 2;
@@ -704,6 +750,10 @@ int main(int argc, char **argv)
 	if (!strcmp(o.bt_socket, "/run/hbas/bt.sock") && getenv("XDG_RUNTIME_DIR")) {
 		snprintf(default_bt, sizeof(default_bt), "%s/hbas-bt.sock", getenv("XDG_RUNTIME_DIR"));
 		o.bt_socket = default_bt;
+	}
+	if (!strcmp(o.gps_socket, "/run/hbas/gps.sock") && getenv("XDG_RUNTIME_DIR")) {
+		snprintf(default_gps, sizeof(default_gps), "%s/hbas-gps.sock", getenv("XDG_RUNTIME_DIR"));
+		o.gps_socket = default_gps;
 	}
 	/* PC: remember settings in the usual per-user place */
 	if (!o.settings) {
@@ -720,6 +770,7 @@ int main(int argc, char **argv)
 #else
 	(void)default_settings;
 	(void)default_bt;
+	(void)default_gps;
 #endif
 	hbas_vehicle_init(&vehicle);
 	use_virtual_clock = snap != NULL;

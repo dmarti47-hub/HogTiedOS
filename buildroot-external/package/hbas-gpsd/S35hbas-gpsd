@@ -1,0 +1,18 @@
+#!/bin/sh
+# u-blox GPS on UART2 (ttyS1): fix for hogtied-ui on /run/hbas/gps.sock, and
+# the system clock from GPS time (the unit has no other time source yet).
+
+case "$1" in
+start)
+	printf "Starting hbas-gpsd: "
+	start-stop-daemon -S -b -m -p /var/run/hbas-gpsd.pid -x /usr/bin/hbas-gpsd -- \
+		--device /dev/ttyS1 --set-clock && echo OK || echo FAIL
+	;;
+stop)
+	printf "Stopping hbas-gpsd: "
+	start-stop-daemon -K -p /var/run/hbas-gpsd.pid && echo OK || echo FAIL
+	rm -f /var/run/hbas-gpsd.pid
+	;;
+restart) "$0" stop; "$0" start ;;
+*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

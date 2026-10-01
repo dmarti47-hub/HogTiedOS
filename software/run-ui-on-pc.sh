@@ -10,6 +10,9 @@
 # settings); the Media page then shows the track and its buttons control the
 # phone. hbas-btd is started alongside (only if libdbus-1-dev is installed).
 #
+# GPS page: hbas-gpsd plays a made-up demo ride (software/gpsd/demo/ride.nmea),
+# since a PC has no u-blox receiver.
+#
 # Keys: Left/Right change pages, Up/Down, Enter selects, Esc goes back.
 # Close the window or press Ctrl+C in the terminal to quit.
 # Nothing here touches the head unit.
@@ -58,16 +61,25 @@ else
     echo "(Media page: install libdbus-1-dev to control your phone's music from here)"
 fi
 
+# GPS daemon, replaying the demo ride
+cmake -S "$ROOT/software/gpsd" -B "$ROOT/build/gpsd-pc" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build "$ROOT/build/gpsd-pc" -j"$(nproc)"
+GPSD="$ROOT/build/gpsd-pc/hbas-gpsd"
+
 # no data source given: play the demo ride (as an OE FLTR unless --bike is set)
 case " $* " in
 *" --demo "*|*" --replay "*|*" --can "*) ;;
 *) case " $* " in *" --bike "*) set -- --demo "$@" ;; *) set -- --demo --bike 2 "$@" ;; esac ;;
 esac
+RUN="${XDG_RUNTIME_DIR:-/tmp}"
+pids=""
 if [ -n "$BTD" ]; then
     # no --agent: the PC's own Bluetooth settings handle pairing
-    "$BTD" --socket "${XDG_RUNTIME_DIR:-/tmp}/hbas-bt.sock" &
-    btd_pid=$!
-    trap 'kill $btd_pid 2>/dev/null' EXIT INT TERM
+    "$BTD" --socket "$RUN/hbas-bt.sock" &
+    pids="$pids $!"
 fi
+"$GPSD" --replay "$ROOT/software/gpsd/demo/ride.nmea" --socket "$RUN/hbas-gps.sock" &
+pids="$pids $!"
+trap 'kill $pids 2>/dev/null' EXIT INT TERM
 echo "Starting hogtied-ui $*  (Left/Right: pages, Esc: back, close window to quit)"
-"$BUILD/hogtied-ui" --bt-socket "${XDG_RUNTIME_DIR:-/tmp}/hbas-bt.sock" "$@"
+"$BUILD/hogtied-ui" --bt-socket "$RUN/hbas-bt.sock" --gps-socket "$RUN/hbas-gps.sock" "$@"

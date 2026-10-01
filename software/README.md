@@ -5,6 +5,7 @@
 | `libhbas/` | C decoder for the bike's CAN messages, field for field from Harley's own `vehicleCAN.lua` (`docs/findings/CROSS_CHECKS.md` sec. 11). No UI or I/O. |
 | `hogtied-ui/` | The main screen, 400x240, LVGL 9.2.2: speed, gear, rpm, warning lights, clock, ambient temperature, tire data. |
 | `btd/` | `hbas-btd`: phone music over Bluetooth. Talks to BlueZ (connected phone, AVRCP track info and play/pause/next/previous, pairing confirmation) and gives the UI a one-line text protocol (`libhbas/btproto.h`). |
+| `gpsd/` | `hbas-gpsd`: the u-blox GPS on UART2. Finds the receiver's baud rate (stock's 9600 → PUBX,41 → 57600 first), parses NMEA, serves the fix to the UI, sets the clock from GPS time. |
 | `iocd/` | `hbas-iocd`: the IOC link on the unit. Answers the power keep-alive, handles shutdown, and forwards bike CAN frames to `vcan0` for the UI. |
 
 Both are built into the image by Buildroot (`buildroot-external/package/hogtied-ui`).
@@ -12,6 +13,8 @@ Both are built into the image by Buildroot (`buildroot-external/package/hogtied-
 ![Demo ride rendered offline](../docs/screenshots/ui-demo.png)
 
 ![Media page](../docs/screenshots/ui-media.png)
+
+![GPS page](../docs/screenshots/ui-gps.png)
 
 ![Audio page](../docs/screenshots/ui-audio.png)
 
@@ -120,6 +123,11 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
   restart) and end to end with the UI. On the unit it also needs the Bluetooth
   chip brought up (SDIO on MMC3) and the A2DP audio routed to the DSP; see
   `docs/findings/BLUETOOTH.md`.
+- **GPS, written, tested on the PC (not on the unit):** NMEA parsing (incl.
+  checksums and the GPS week-rollover fix) and the daemon (against a pretend
+  receiver on a pseudo-terminal: stock's baud command, locking, bad
+  sentences, receiver going quiet). On the PC the GPS page plays a made-up
+  demo ride. `docs/findings/GPS.md`.
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.
