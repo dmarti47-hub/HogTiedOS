@@ -85,6 +85,8 @@ static void refresh(void)
 											: "Phone");
 	else if (bt.pairable)
 		lv_label_set_text(lbl_phone, LV_SYMBOL_BLUETOOTH " Visible: pair from your phone");
+	else if (!bt.agent)
+		lv_label_set_text(lbl_phone, LV_SYMBOL_BLUETOOTH " No phone: pair it in this PC's settings");
 	else
 		lv_label_set_text(lbl_phone, LV_SYMBOL_BLUETOOTH " No phone connected");
 
@@ -102,7 +104,7 @@ static void refresh(void)
 
 	for (int i = 0; i < BTN_COUNT; i++) {
 		bool hi = i == sel;
-		bool enabled = i == BTN_PAIR ? bt.daemon : bt.player;
+		bool enabled = i == BTN_PAIR ? bt.daemon && bt.agent : bt.player;
 
 		lv_label_set_text(btn_lbl[i], i == BTN_PLAY && bt.status == HBAS_BT_PLAYING
 					      ? LV_SYMBOL_PAUSE : sym[i]);
@@ -249,8 +251,8 @@ bool ui_media_key(enum ui_key key)
 	case UI_KEY_ENTER:
 		if (sel != BTN_PAIR && !bt.player)
 			break;                      /* greyed out: no phone controls */
-		if (sel == BTN_PAIR && !bt.daemon)
-			break;
+		if (sel == BTN_PAIR && !(bt.daemon && bt.agent))
+			break;                      /* PC: pair from its own settings */
 		switch (sel) {
 		case BTN_PREV: cmd("previous\n"); break;
 		case BTN_NEXT: cmd("next\n"); break;

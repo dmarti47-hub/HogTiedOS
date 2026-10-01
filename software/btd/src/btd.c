@@ -56,6 +56,7 @@
 #define PAIRABLE_SECS  180
 
 static int verbose;
+static bool agent_enabled;              /* --agent: we confirm pairing */
 static volatile sig_atomic_t stop;
 
 static void logmsg(const char *fmt, ...)
@@ -303,6 +304,7 @@ static void build_state(char *bt, char *track, char *play)
 	hbas_bt_format(bt, HBAS_BT_LINE_MAX, "bt",
 		       "powered", a && a->powered ? "1" : "0",
 		       "pairable", a && a->discoverable && a->pairable ? "1" : "0",
+		       "agent", agent_enabled ? "1" : "0",
 		       "connected", d ? "1" : "0",
 		       "name", d ? d->name : "",
 		       "player", p || (d && d->control) ? "1" : "0", NULL);
@@ -436,7 +438,6 @@ static void resync(void)
 
 /* ---- pairing agent ---------------------------------------------------- */
 
-static bool agent_enabled;
 static DBusMessage *pending;            /* RequestConfirmation awaiting the rider */
 static char pending_device[128];
 
@@ -701,8 +702,14 @@ static void handle_command(const char *line)
 			return;
 		}
 	}
-	if (!strcmp(m.verb, "pairable"))
-		set_pairable(!strcmp(arg, "on"));
+	if (!strcmp(m.verb, "pairable")) {
+		/* only as the pairing agent (the unit): on a PC the desktop pairs,
+		 * and we must not change the PC's own adapter settings */
+		if (agent_enabled)
+			set_pairable(!strcmp(arg, "on"));
+		else
+			logmsg("pairable: ignored, not the pairing agent (pair from the PC's settings)");
+	}
 	else if (!strcmp(m.verb, "confirm"))
 		answer_pending(!strcmp(arg, "yes"));
 	else if (!strcmp(m.verb, "disconnect") && d)

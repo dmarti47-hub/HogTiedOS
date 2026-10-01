@@ -6,7 +6,9 @@
  * watch and drive by hand (socat - UNIX-CONNECT:/run/hbas/bt.sock).
  *
  * daemon -> UI
- *   bt powered=0|1 pairable=0|1 connected=0|1 name="Phone" [player=0|1]
+ *   bt powered=0|1 pairable=0|1 agent=0|1 connected=0|1 name="Phone" [player=0|1]
+ *      (agent=1: this daemon confirms pairing, so the UI may offer "Pair";
+ *       on a PC the desktop pairs and "pairable" is ignored)
  *   track title=".." artist=".." album=".." duration=MS
  *   play status=playing|paused|stopped|forward-seek|reverse-seek|error position=MS
  *   pair device="Phone" passkey=123456      (confirm on screen)
@@ -53,7 +55,7 @@ enum hbas_bt_status { HBAS_BT_STOPPED, HBAS_BT_PLAYING, HBAS_BT_PAUSED, HBAS_BT_
 
 struct hbas_bt_state {
 	bool daemon;                 /* connected to hbas-btd */
-	bool powered, pairable, connected, player;
+	bool powered, pairable, agent, connected, player;
 	char device[HBAS_BT_TEXT_MAX];
 	char title[HBAS_BT_TEXT_MAX], artist[HBAS_BT_TEXT_MAX], album[HBAS_BT_TEXT_MAX];
 	uint32_t duration_ms, position_ms;

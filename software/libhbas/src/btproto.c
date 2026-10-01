@@ -174,6 +174,7 @@ bool hbas_bt_apply(struct hbas_bt_state *s, const struct hbas_bt_msg *m)
 	if (!strcmp(m->verb, "bt")) {
 		s->powered = flag(m, "powered", s->powered);
 		s->pairable = flag(m, "pairable", s->pairable);
+		s->agent = flag(m, "agent", s->agent);
 		s->connected = flag(m, "connected", s->connected);
 		s->player = flag(m, "player", s->connected && s->player);
 		if (hbas_bt_get(m, "name"))

@@ -65,6 +65,9 @@ static void test_state(void)
 	hbas_bt_state_init(&s);
 	apply(&s, "bt powered=1 pairable=0 connected=1 name=\"Dave's Pixel\" player=1\n");
 	CHECK(s.powered && s.connected && s.player && !strcmp(s.device, "Dave's Pixel"));
+	CHECK(!s.agent);
+	apply(&s, "bt agent=1\n");
+	CHECK(s.agent && s.connected);
 	apply(&s, "track title=Thunderstruck artist=\"AC/DC\" album=\"The Razors Edge\" duration=292000\n");
 	apply(&s, "play status=playing position=12000\n");
 	CHECK(s.status == HBAS_BT_PLAYING && s.position_ms == 12000 && s.duration_ms == 292000);

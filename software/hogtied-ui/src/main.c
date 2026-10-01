@@ -326,7 +326,7 @@ static int snapshot(const char *prefix)
 	ui_set_bike(2);                         /* demo bike: OE FLTR, as the IOC would report */
 	/* demo phone, as hbas-btd would report it */
 	bt_state.daemon = true;
-	bt_feed_line("bt powered=1 pairable=0 connected=1 name=\"Rider's Phone\" player=1");
+	bt_feed_line("bt powered=1 pairable=0 agent=1 connected=1 name=\"Rider's Phone\" player=1");
 	bt_feed_line("track title=\"Born to Be Wild\" artist=Steppenwolf album=Steppenwolf "
 		     "duration=210000");
 	bt_feed_line("play status=playing position=64000");
