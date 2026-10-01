@@ -41,7 +41,8 @@ class Fake(dbus.service.Object):
             ADAPTER: {'org.bluez.Adapter1': {'Powered': True, 'Pairable': False,
                                              'Discoverable': False}},
             DEVICE: {'org.bluez.Device1': {'Alias': "Dave's Pixel", 'Connected': True,
-                                           'Paired': True}},
+                                           'Paired': True},
+                     'org.bluez.MediaControl1': {'Connected': True}},
             PLAYER: {'org.bluez.MediaPlayer1': {
                 'Status': 'paused', 'Position': dbus.UInt32(1000),
                 'Track': dbus.Dictionary({'Title': 'Thunderstruck', 'Artist': 'AC/DC',
@@ -112,13 +113,26 @@ class Obj(dbus.service.Object):
         pass
 
 
+class Dev(Obj):
+    """The phone: Device1 plus BlueZ's basic AVRCP remote (MediaControl1)."""
+
+    @dbus.service.method('org.bluez.MediaControl1')
+    def Play(self):
+        self.fake.calls.append(('Play', self._object_path))
+
+    @dbus.service.method('org.bluez.MediaControl1')
+    def Next(self):
+        self.fake.calls.append(('Next', self._object_path))
+
+
 class BtdTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.bus = dbus.SessionBus()
         cls.name = dbus.service.BusName('org.bluez', cls.bus)
         cls.fake = Fake(cls.bus)
-        cls.objs = {p: Obj(cls.fake, p) for p in (ADAPTER, DEVICE, PLAYER, '/org/bluez')}
+        cls.objs = {p: Obj(cls.fake, p) for p in (ADAPTER, PLAYER, '/org/bluez')}
+        cls.objs[DEVICE] = Dev(cls.fake, DEVICE)
         cls.loop = GLib.MainLoop()
         threading.Thread(target=cls.loop.run, daemon=True).start()
         cls.tmp = tempfile.mkdtemp()
@@ -283,6 +297,21 @@ class BtdTest(unittest.TestCase):
         self.wait_call('RegisterAgent')           # agent registered again
         s, f = self.connect()
         self.assertIn('powered=1', self.expect(f, 'bt'))
+        s.close()
+
+    def test_7_controls_without_a_phone_player(self):
+        """Some phones publish no MediaPlayer1 until music plays: buttons then
+        go to BlueZ's basic AVRCP remote on the device."""
+        s, f = self.connect()
+        self.expect(f, 'play')
+        GLib.idle_add(lambda: self.fake.InterfacesRemoved(PLAYER, ['org.bluez.MediaPlayer1'])
+                      and False)
+        time.sleep(0.3)                                # no 'bt' change: controls stay on
+        s2, f2 = self.connect()
+        self.assertIn('player=1', self.expect(f2, 'bt'))
+        s2.close()
+        s.sendall(b'next\n')
+        self.assertEqual(self.wait_call('Next')[1], DEVICE)
         s.close()
 
 

@@ -45,6 +45,7 @@
 #define IF_ADAPTER     "org.bluez.Adapter1"
 #define IF_DEVICE      "org.bluez.Device1"
 #define IF_PLAYER      "org.bluez.MediaPlayer1"
+#define IF_CONTROL     "org.bluez.MediaControl1"
 #define IF_AGENT       "org.bluez.Agent1"
 #define IF_AGENT_MGR   "org.bluez.AgentManager1"
 #define IF_PROPS       "org.freedesktop.DBus.Properties"
@@ -77,6 +78,7 @@ struct obj {
 	bool powered, pairable, discoverable;
 	/* device */
 	bool connected, paired;
+	bool control;                    /* MediaControl1 connected (AVRCP up) */
 	char name[HBAS_BT_TEXT_MAX];
 	/* player */
 	char status[24];
@@ -118,6 +120,12 @@ static struct obj *first(bool (*pred)(const struct obj *))
 		if (objs[i].path[0] && pred(&objs[i]))
 			return &objs[i];
 	return NULL;
+}
+
+static bool known_iface(const char *iface)
+{
+	return !strcmp(iface, IF_ADAPTER) || !strcmp(iface, IF_DEVICE) ||
+	       !strcmp(iface, IF_PLAYER) || !strcmp(iface, IF_CONTROL);
 }
 
 static bool is_adapter(const struct obj *o) { return o->adapter; }
@@ -205,7 +213,7 @@ static void apply_props(struct obj *o, const char *iface, DBusMessageIter *dict)
 		o->device = true;
 	else if (!strcmp(iface, IF_PLAYER))
 		o->player = true;
-	else
+	else if (strcmp(iface, IF_CONTROL))
 		return;
 	for (; dbus_message_iter_get_arg_type(dict) == DBUS_TYPE_DICT_ENTRY;
 	     dbus_message_iter_next(dict)) {
@@ -219,6 +227,8 @@ static void apply_props(struct obj *o, const char *iface, DBusMessageIter *dict)
 			if (!strcmp(k, "Powered")) o->powered = get_bool(&val);
 			else if (!strcmp(k, "Pairable")) o->pairable = get_bool(&val);
 			else if (!strcmp(k, "Discoverable")) o->discoverable = get_bool(&val);
+		} else if (!strcmp(iface, IF_CONTROL)) {
+			if (!strcmp(k, "Connected")) o->control = get_bool(&val);
 		} else if (!strcmp(iface, IF_DEVICE)) {
 			if (!strcmp(k, "Connected")) o->connected = get_bool(&val);
 			else if (!strcmp(k, "Paired")) o->paired = get_bool(&val);
@@ -243,7 +253,7 @@ static void apply_ifaces(const char *path, DBusMessageIter *arr)
 
 		dbus_message_iter_recurse(arr, &ent);
 		dbus_message_iter_get_basic(&ent, &iface);
-		if (strcmp(iface, IF_ADAPTER) && strcmp(iface, IF_DEVICE) && strcmp(iface, IF_PLAYER))
+		if (!known_iface(iface))
 			continue;
 		if (!(o = find(path, true)))
 			return;
@@ -295,7 +305,7 @@ static void build_state(char *bt, char *track, char *play)
 		       "pairable", a && a->discoverable && a->pairable ? "1" : "0",
 		       "connected", d ? "1" : "0",
 		       "name", d ? d->name : "",
-		       "player", p ? "1" : "0", NULL);
+		       "player", p || (d && d->control) ? "1" : "0", NULL);
 	snprintf(dur, sizeof(dur), "%u", p ? p->duration : 0);
 	hbas_bt_format(track, HBAS_BT_LINE_MAX, "track",
 		       "title", p ? p->title : "", "artist", p ? p->artist : "",
@@ -595,7 +605,7 @@ static DBusHandlerResult filter(DBusConnection *c, DBusMessage *msg, void *data)
 		    dbus_message_iter_get_arg_type(&it) != DBUS_TYPE_STRING)
 			return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 		dbus_message_iter_get_basic(&it, &iface);
-		if (strcmp(iface, IF_ADAPTER) && strcmp(iface, IF_DEVICE) && strcmp(iface, IF_PLAYER))
+		if (!known_iface(iface))
 			return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 		if (!(o = find(path, true)))
 			return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
@@ -634,6 +644,7 @@ static DBusHandlerResult filter(DBusConnection *c, DBusMessage *msg, void *data)
 				if (!(o = find(p, false)))
 					break;
 				if (!strcmp(iface, IF_PLAYER)) o->player = false;
+				if (!strcmp(iface, IF_CONTROL)) o->control = false;
 				if (!strcmp(iface, IF_DEVICE)) o->device = o->connected = false;
 				if (!strcmp(iface, IF_ADAPTER)) o->adapter = false;
 				if (!o->player && !o->device && !o->adapter)
@@ -679,10 +690,14 @@ static void handle_command(const char *line)
 		logmsg("<- %s %s", m.verb, arg);
 	for (unsigned i = 0; i < sizeof(media) / sizeof(media[0]); i++) {
 		if (!strcmp(m.verb, media[i].cmd)) {
+			/* the phone's player if it published one, else the basic
+			 * AVRCP remote control BlueZ offers once AVRCP is up */
 			if (p)
 				call_noreply(p->path, IF_PLAYER, media[i].method);
+			else if (d && d->control)
+				call_noreply(d->path, IF_CONTROL, media[i].method);
 			else
-				logmsg("%s: no phone media player", m.verb);
+				logmsg("%s: phone has no media controls", m.verb);
 			return;
 		}
 	}
