@@ -247,6 +247,10 @@ bool ui_media_key(enum ui_key key)
 	case UI_KEY_UP: sel = (sel + BTN_COUNT - 1) % BTN_COUNT; break;
 	case UI_KEY_DOWN: sel = (sel + 1) % BTN_COUNT; break;
 	case UI_KEY_ENTER:
+		if (sel != BTN_PAIR && !bt.player)
+			break;                      /* greyed out: no phone controls */
+		if (sel == BTN_PAIR && !bt.daemon)
+			break;
 		switch (sel) {
 		case BTN_PREV: cmd("previous\n"); break;
 		case BTN_NEXT: cmd("next\n"); break;
