@@ -213,6 +213,7 @@ void ui_create(void)
 	lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
 	pages[UI_PAGE_DASH] = page_create(scr, "HOGTIED");
+	pages[UI_PAGE_MAP] = page_create(scr, "MAP");
 	pages[UI_PAGE_MEDIA] = page_create(scr, "MEDIA");
 	pages[UI_PAGE_AUDIO] = page_create(scr, "AUDIO");
 	pages[UI_PAGE_EQ] = page_create(scr, "EQ");
@@ -220,6 +221,7 @@ void ui_create(void)
 	pages[UI_PAGE_GPS] = page_create(scr, "GPS");
 	pages[UI_PAGE_SYSTEM] = page_create(scr, "SYSTEM");
 	build_dash(pages[UI_PAGE_DASH]);
+	ui_map_build(pages[UI_PAGE_MAP]);
 	ui_media_build(pages[UI_PAGE_MEDIA]);
 	ui_audio_build(pages[UI_PAGE_AUDIO]);
 	ui_eq_build(pages[UI_PAGE_EQ]);
@@ -340,6 +342,8 @@ void ui_set_bike(int cfg)
 void ui_key(enum ui_key key)
 {
 	if (ui_media_pairing_key(key))
+		return;
+	if (page == UI_PAGE_MAP && ui_map_key(key))
 		return;
 	if (page == UI_PAGE_MEDIA && ui_media_key(key))
 		return;

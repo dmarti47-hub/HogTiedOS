@@ -26,6 +26,10 @@
  * GPS page: hbas-gpsd's socket, /run/hbas/gps.sock or --gps-socket PATH
  * (PC window build default: $XDG_RUNTIME_DIR/hbas-gps.sock).
  *
+ * Map page: --map-dir DIR (a map from tools/maps/build_map.sh),
+ * --map-style FILE (software/maps/hogtied.oss), --map-font FILE (TTF).
+ * Only in builds with HOGTIED_MAP.
+ *
  * Settings (volume, output, EQ, ...) are remembered:
  *   --settings FILE   where to keep them; default on a PC window build:
  *                     ~/.config/hogtied/settings.conf
@@ -325,7 +329,8 @@ static void press_keys(const char *keys)
 	}
 }
 
-static int snapshot(const char *prefix)
+static int snapshot(const char *prefix, const char *map_dir, const char *map_style,
+		    const char *map_font)
 {
 	static uint16_t buf[UI_WIDTH * UI_HEIGHT];
 	/* keys: L/R/U/D = arrows, E = enter, B = back */
@@ -333,6 +338,7 @@ static int snapshot(const char *prefix)
 		{ 500, "", "01-key-on" },
 		{ 11000, "", "02-accelerating" },
 		{ 22000, "", "03-cruise-low-fuel" },
+		{ 22020, "R", "03a-map" },
 		{ 22050, "R", "03b-media" },                       /* demo phone playing */
 		{ 22100, "R", "04-audio" },
 		{ 22200, "DERRR", "05-audio-fade-adjust" },        /* fade 3 steps front */
@@ -347,9 +353,9 @@ static int snapshot(const char *prefix)
 		{ 22800, "R", "11-system" },
 		{ 22900, "B", "12-back-to-dash" },
 		/* same bike reporting itself as a trike: third tire appears */
-		{ 23000, "RRRR", "13-tires-trike" },
+		{ 23000, "RRRRR", "13-tires-trike" },
 		/* 2-speaker bike, back on speakers: no fade row */
-		{ 23100, "BRRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
+		{ 23100, "BRRRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
 		{ 23150, "DERE", "14b-audio-speed-volume" },       /* speed volume on at demo speed */
 		{ 23200, "RD", "15-eq-harley-speakers" },          /* EQ page, Custom -> Harley */
 	};
@@ -363,6 +369,7 @@ static int snapshot(const char *prefix)
 	audio_log_quiet = true;
 	ui_set_audio_backend(&log_backend);
 	ui_set_bike(2);                         /* demo bike: OE FLTR, as the IOC would report */
+	ui_map_open(map_dir, map_style, map_font);
 	/* demo phone, as hbas-btd would report it */
 	bt_state.daemon = true;
 	bt_feed_line("bt powered=1 pairable=0 agent=1 connected=1 name=\"Rider's Phone\" player=1");
@@ -380,6 +387,12 @@ static int snapshot(const char *prefix)
 		if (!strcmp(script[i].name, "14-audio-2-speakers"))
 			ui_set_speaker_count(2);
 		run_to(script[i].t);
+		if (!strcmp(script[i].name, "03a-map"))
+			/* the map draws on its own thread: give it time (real time) */
+			for (int ms = 0; ms < 5000 && !ui_map_has_frame(); ms += 10) {
+				ui_map_tick();
+				usleep(10000);
+			}
 		press_keys(script[i].keys);
 		ui_update(&vehicle);
 		lv_obj_invalidate(lv_screen_active());
@@ -588,7 +601,7 @@ static lv_display_t *create_display(const char *fbdev)
 
 struct live_opts {
 	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file, *bt_socket;
-	const char *gps_socket;
+	const char *gps_socket, *map_dir, *map_style, *map_font;
 	bool demo, stdin_keys;
 	int speakers, bike;
 };
@@ -634,6 +647,7 @@ static int run_live(const struct live_opts *o)
 	create_display(o->fbdev);
 	ui_set_speaker_count(o->speakers);
 	ui_media_set_sender(bt_send);
+	ui_map_open(o->map_dir, o->map_style, o->map_font);
 	bt_client.path = o->bt_socket;
 	gps_client.path = o->gps_socket;
 	if (o->bike >= 0)
@@ -657,6 +671,7 @@ static int run_live(const struct live_opts *o)
 		/* hbas-btd / hbas-gpsd may start after us, or restart */
 		lc_poll(&bt_client, now);
 		lc_poll(&gps_client, now);
+		ui_map_tick();
 		ui_media_tick();
 		/* the IOC sends the bike configuration once, at startup */
 		if (o->bike < 0 && now >= next_bike_check) {
@@ -689,6 +704,7 @@ static int run_live(const struct live_opts *o)
 		usleep(lv_timer_handler() * 1000);
 	}
 	persist_flush();                        /* a change made just before exit */
+	ui_map_close();
 	return 0;
 #else
 	(void)o;
@@ -730,6 +746,12 @@ int main(int argc, char **argv)
 			o.bt_socket = argv[++i];
 		else if (!strcmp(argv[i], "--gps-socket") && i + 1 < argc)
 			o.gps_socket = argv[++i];
+		else if (!strcmp(argv[i], "--map-dir") && i + 1 < argc)
+			o.map_dir = argv[++i];
+		else if (!strcmp(argv[i], "--map-style") && i + 1 < argc)
+			o.map_style = argv[++i];
+		else if (!strcmp(argv[i], "--map-font") && i + 1 < argc)
+			o.map_font = argv[++i];
 		else if (!strcmp(argv[i], "--bike-file") && i + 1 < argc)
 			o.bike_file = argv[++i];
 		else if (!strcmp(argv[i], "--settings") && i + 1 < argc)
@@ -740,6 +762,7 @@ int main(int argc, char **argv)
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
 				"[--fb DEV] [--stdin-keys] [--speakers 2|4] [--bike N | --bike-file F]\n"
 				"       [--bt-socket PATH] [--gps-socket PATH]\n"
+				"       [--map-dir DIR --map-style OSS --map-font TTF]\n"
 				"       [--settings FILE [--settings-mount DIR]] | --snapshot PREFIX\n",
 				argv[0]);
 			return 2;
@@ -779,5 +802,5 @@ int main(int argc, char **argv)
 #endif
 	lv_init();
 	lv_tick_set_cb(tick_ms);
-	return snap ? snapshot(snap) : run_live(&o);
+	return snap ? snapshot(snap, o.map_dir, o.map_style, o.map_font) : run_live(&o);
 }

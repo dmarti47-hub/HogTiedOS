@@ -13,6 +13,10 @@
 # GPS page: hbas-gpsd plays a made-up demo ride (software/gpsd/demo/ride.nmea),
 # since a PC has no u-blox receiver.
 #
+# Map page: shown when libosmscout is installed in build/prefix and a map
+# has been built with tools/maps/build_map.sh (docs/NAVIGATION.md); it
+# follows the demo ride. Up/Down zoom, Enter: north-up / heading-up.
+#
 # Keys: Left/Right change pages, Up/Down, Enter selects, Esc goes back.
 # Close the window or press Ctrl+C in the terminal to quit.
 # Nothing here touches the head unit.
@@ -47,8 +51,22 @@ if [ ! -f "$LVGL_DIR/lvgl.h" ]; then
     tar -xzf "$tarball" -C "$ROOT/build"
 fi
 
+# map page if libosmscout and a map are there
+MAP_ARGS=""
+MAP_CMAKE="-DHOGTIED_MAP=OFF"
+MAP_DIR=$(dirname "$(ls "$ROOT"/build/maps/*/db.json 2>/dev/null | head -1)" 2>/dev/null || true)
+MAP_FONT=$(fc-match -f '%{file}' "DejaVu Sans" 2>/dev/null || true)
+if [ -f "$ROOT/build/prefix/lib/cmake/libosmscout/libosmscoutConfig.cmake" ] &&
+   [ -n "$MAP_DIR" ] && [ "$MAP_DIR" != "." ] && [ -n "$MAP_FONT" ]; then
+    MAP_CMAKE="-DHOGTIED_MAP=ON -DCMAKE_PREFIX_PATH=$ROOT/build/prefix"
+    MAP_ARGS="--map-dir $MAP_DIR --map-style $ROOT/software/maps/hogtied.oss --map-font $MAP_FONT"
+    echo "Map page: $MAP_DIR"
+else
+    echo "(Map page: no map built; see docs/NAVIGATION.md)"
+fi
+
 cmake -S "$ROOT/software/hogtied-ui" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release \
-      -DLVGL_DIR="$LVGL_DIR" -DHOGTIED_SDL=ON >/dev/null
+      -DLVGL_DIR="$LVGL_DIR" -DHOGTIED_SDL=ON $MAP_CMAKE >/dev/null
 cmake --build "$BUILD" -j"$(nproc)"
 
 # Bluetooth media daemon: optional on a PC (needs libdbus-1-dev)
@@ -82,4 +100,5 @@ fi
 pids="$pids $!"
 trap 'kill $pids 2>/dev/null' EXIT INT TERM
 echo "Starting hogtied-ui $*  (Left/Right: pages, Esc: back, close window to quit)"
-"$BUILD/hogtied-ui" --bt-socket "$RUN/hbas-bt.sock" --gps-socket "$RUN/hbas-gps.sock" "$@"
+# shellcheck disable=SC2086 # MAP_ARGS is a list of options
+"$BUILD/hogtied-ui" --bt-socket "$RUN/hbas-bt.sock" --gps-socket "$RUN/hbas-gps.sock" $MAP_ARGS "$@"

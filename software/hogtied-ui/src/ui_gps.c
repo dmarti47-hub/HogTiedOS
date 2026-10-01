@@ -146,6 +146,7 @@ void ui_gps_update(const struct hbas_gps_view *v)
 {
 	gps = *v;
 	refresh();
+	ui_map_gps(v);
 }
 
 void ui_gps_set_metric(bool m)

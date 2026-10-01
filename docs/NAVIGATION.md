@@ -54,6 +54,19 @@ labels); the route will be drawn in orange by the UI on top.
 
 ![Milwaukee in the HogTiedOS style at three zooms](screenshots/map-style.png)
 
+## Map page (stage 2)
+
+`software/hbas-map` is a small C interface over libosmscout (open a map,
+draw a frame at a position / zoom / rotation into RGB565, map a position to
+a pixel). The UI's Map page (right after the dash) draws on a worker thread
+into the buffer that isn't on screen and swaps it in, so the UI never
+waits; an orange arrow marks the bike; Up/Down zoom (9-17), OK toggles
+heading-up / north-up; "(c) OpenStreetMap" credit. One frame takes
+~15-80 ms on the PC. Notes: a reused libosmscout painter drops street
+names from the next frame, so a fresh one is made per frame.
+
+![Map page, heading-up, Milwaukee demo ride](screenshots/ui-map.png)
+
 ## Stages
 
 1. Map pipeline (done for one state).
@@ -67,4 +80,14 @@ labels); the route will be drawn in orange by the UI on top.
    `hogtied/maps/` on the eMMC next to (never replacing) Harley's, speed
    tuning.
 
-Open: free space on the eMMC (needs the unit); which regions to ship.
+## Known issues
+
+- **Water over land on rotated maps with a state extract:** with the
+  Wisconsin test map, heading-up frames near Milwaukee fill with water
+  colour. Removing water areas from the style removes it, so it's a water
+  outline: Lake Michigan, which a single-state extract only contains a
+  broken piece of (its outline crosses four states). The North America map
+  will have it whole; re-check then. If it remains, use libosmscout's world
+  basemap (OSM land polygons) for sea/land.
+
+Open: free space on the eMMC (needs the unit).

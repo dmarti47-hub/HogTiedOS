@@ -6,6 +6,8 @@
 | `hogtied-ui/` | The main screen, 400x240, LVGL 9.2.2: speed, gear, rpm, warning lights, clock, ambient temperature, tire data. |
 | `btd/` | `hbas-btd`: phone music over Bluetooth. Talks to BlueZ (connected phone, AVRCP track info and play/pause/next/previous, pairing confirmation) and gives the UI a one-line text protocol (`libhbas/btproto.h`). |
 | `gpsd/` | `hbas-gpsd`: the u-blox GPS on UART2. Finds the receiver's baud rate (stock's 9600 → PUBX,41 → 57600 first), parses NMEA, serves the fix to the UI, sets the clock from GPS time. |
+| `hbas-map/` | Offline map drawing for the Map page: a C interface over libosmscout (docs/NAVIGATION.md). |
+| `maps/` | `hogtied.oss`, the greyscale map style. |
 | `iocd/` | `hbas-iocd`: the IOC link on the unit. Answers the power keep-alive, handles shutdown, and forwards bike CAN frames to `vcan0` for the UI. |
 
 Both are built into the image by Buildroot (`buildroot-external/package/hogtied-ui`).

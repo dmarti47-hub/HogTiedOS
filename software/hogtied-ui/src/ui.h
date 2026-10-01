@@ -13,7 +13,7 @@
 /* Navigation keys: handlebars (via hbas-iocd), PC arrow keys, or stdin. */
 enum ui_key { UI_KEY_LEFT, UI_KEY_RIGHT, UI_KEY_UP, UI_KEY_DOWN, UI_KEY_ENTER, UI_KEY_BACK };
 
-enum ui_page { UI_PAGE_DASH, UI_PAGE_MEDIA, UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_TIRES, UI_PAGE_GPS,
+enum ui_page { UI_PAGE_DASH, UI_PAGE_MAP, UI_PAGE_MEDIA, UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_TIRES, UI_PAGE_GPS,
 	       UI_PAGE_SYSTEM, UI_PAGE_COUNT };
 
 void ui_create(void);
@@ -69,6 +69,15 @@ void ui_media_update(const struct hbas_bt_state *s);
 void ui_media_tick(void);                    /* progress bar, toasts */
 bool ui_media_key(enum ui_key key);
 bool ui_media_pairing_key(enum ui_key key);  /* pairing box takes keys on any page */
+
+/* Map page: offline map (hbas-map) centred on the GPS fix. */
+void ui_map_build(lv_obj_t *page);
+void ui_map_open(const char *db, const char *style, const char *font);   /* NULL db: none */
+void ui_map_close(void);
+void ui_map_tick(void);                      /* swap in finished frames */
+bool ui_map_has_frame(void);
+void ui_map_gps(const struct hbas_gps_view *v);
+bool ui_map_key(enum ui_key key);
 
 /* GPS page: hbas-gpsd's view of the u-blox receiver (gpsproto.h). */
 void ui_gps_build(lv_obj_t *page);
