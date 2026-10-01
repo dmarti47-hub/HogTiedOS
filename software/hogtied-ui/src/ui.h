@@ -82,6 +82,19 @@ void ui_map_places(const char *path);         /* saved places file; NULL: none *
 void ui_map_add_place(const char *name, double lat, double lon);   /* not saved */
 bool ui_map_idle(void);                       /* no route or frame in progress */
 
+/* On-screen keyboard (touch and handlebar buttons), with autofill rows. */
+#define UI_KBD_SUGGESTIONS 3
+enum ui_kbd_result { UI_KBD_CANCEL, UI_KBD_OK, UI_KBD_PICK };
+typedef void (*ui_kbd_done_cb)(enum ui_kbd_result r, const char *text, int pick);
+void ui_kbd_build(void);
+/* changed (may be NULL) is called after every edit, e.g. to search */
+void ui_kbd_open(const char *title, const char *initial, void (*changed)(const char *),
+		 ui_kbd_done_cb done);
+void ui_kbd_suggest(const char *const *labels, int n);
+bool ui_kbd_active(void);
+void ui_kbd_type(const char *s);              /* as if typed (scripts, tests) */
+bool ui_kbd_key(enum ui_key key);
+
 /* GPS page: hbas-gpsd's view of the u-blox receiver (gpsproto.h). */
 void ui_gps_build(lv_obj_t *page);
 void ui_gps_update(const struct hbas_gps_view *v);

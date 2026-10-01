@@ -340,9 +340,13 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		{ 11000, "", "02-accelerating" },
 		{ 22000, "", "03-cruise-low-fuel" },
 		{ 22020, "R", "03a-map" },
-		{ 22025, "E", "03a1-map-menu" },                  /* test places */
-		{ 22030, "DE", "03a2-map-route" },                 /* Go to Devil's Lake */
-		{ 22050, "R", "03b-media" },                       /* demo phone playing */
+		{ 22025, "E", "03a1-map-menu" },                  /* find, test places */
+		{ 22030, "DDEE", "03a2-map-route" },               /* Devil's Lake -> Go */
+		{ 22035, "EDE", "03a3-map-find" },                 /* Find address, "madi" */
+		{ 22040, "UUUE", "03a4-map-result" },              /* first suggestion */
+		{ 22045, "BDDE", "03a5-map-place" },               /* H-D Museum's menu */
+		{ 22050, "BB", "03a6-map-reroute" },               /* bike leaves the route */
+		{ 22055, "R", "03b-media" },                       /* demo phone playing */
 		{ 22100, "R", "04-audio" },
 		{ 22200, "DERRR", "05-audio-fade-adjust" },        /* fade 3 steps front */
 		{ 22300, "EDER", "06-audio-custom-system" },       /* output -> custom system */
@@ -394,6 +398,14 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 			ui_set_speaker_count(2);
 		run_to(script[i].t);
 		press_keys(script[i].keys);
+		if (!strcmp(script[i].name, "03a3-map-find"))
+			ui_kbd_type("madi");
+		if (!strcmp(script[i].name, "03a6-map-reroute"))
+			/* three fixes ~400 m north of the route's start */
+			for (int k = 0; k < 3; k++)
+				gps_feed_line("gps link=1 valid=1 fix=3d quality=1 lat=43.042500 "
+					      "lon=-87.906474 speed=40.0 course=0.0 alt=181.0 used=9 "
+					      "view=12 hdop=0.8 time=1790885740");
 		if (!strncmp(script[i].name, "03a", 3))
 			/* the map draws (and routes) on its own thread: give it
 			 * time (real time) */
@@ -577,14 +589,17 @@ static void window_key_cb(lv_event_t *e)
 	}
 }
 
-static lv_display_t *create_display(const char *fbdev)
+static lv_display_t *create_display(const char *fbdev, const char *touch)
 {
 	lv_display_t *d = lv_sdl_window_create(UI_WIDTH, UI_HEIGHT);
 	lv_indev_t *kb = lv_sdl_keyboard_create();
+
+	lv_sdl_mouse_create();              /* the mouse stands in for touch */
 	lv_group_t *g = lv_group_create();
 	lv_obj_t *catcher;
 
 	(void)fbdev;
+	(void)touch;
 	lv_sdl_window_set_zoom(d, 2);       /* 400x240 is tiny on a PC monitor */
 	ui_create();
 	/* an invisible focused object receives the keyboard's key events */
@@ -597,19 +612,23 @@ static lv_display_t *create_display(const char *fbdev)
 	return d;
 }
 #elif defined(HOGTIED_FBDEV)
-static lv_display_t *create_display(const char *fbdev)
+static lv_display_t *create_display(const char *fbdev, const char *touch)
 {
 	lv_display_t *d = lv_linux_fbdev_create();
 
 	lv_linux_fbdev_set_file(d, fbdev);
 	ui_create();
+	/* touchscreen: which controller the radio has, and its calibration
+	 * (the EEPROM's touchCal), are still unknown; raw evdev for now */
+	if (touch && !lv_evdev_create(LV_INDEV_TYPE_POINTER, touch))
+		fprintf(stderr, "touch: cannot open %s\n", touch);
 	return d;
 }
 #endif
 
 struct live_opts {
 	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file, *bt_socket;
-	const char *gps_socket, *map_dir, *map_style, *map_font, *places;
+	const char *gps_socket, *map_dir, *map_style, *map_font, *places, *touch;
 	bool demo, stdin_keys;
 	int speakers, bike;
 };
@@ -652,7 +671,7 @@ static int run_live(const struct live_opts *o)
 		fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_NONBLOCK);
 	signal(SIGINT, on_stop_signal);
 	signal(SIGTERM, on_stop_signal);
-	create_display(o->fbdev);
+	create_display(o->fbdev, o->touch);
 	ui_set_speaker_count(o->speakers);
 	ui_media_set_sender(bt_send);
 	ui_map_open(o->map_dir, o->map_style, o->map_font);
@@ -769,12 +788,15 @@ int main(int argc, char **argv)
 			o.settings_mount = argv[++i];
 		else if (!strcmp(argv[i], "--places") && i + 1 < argc)
 			o.places = argv[++i];
+		else if (!strcmp(argv[i], "--touch") && i + 1 < argc)
+			o.touch = argv[++i];
 		else {
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
 				"[--fb DEV] [--stdin-keys] [--speakers 2|4] [--bike N | --bike-file F]\n"
 				"       [--bt-socket PATH] [--gps-socket PATH]\n"
 				"       [--map-dir DIR --map-style OSS --map-font TTF]\n"
 				"       [--settings FILE [--settings-mount DIR]] [--places FILE]\n"
+				"       [--touch /dev/input/eventN]\n"
 				"       | --snapshot PREFIX\n",
 				argv[0]);
 			return 2;

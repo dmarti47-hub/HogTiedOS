@@ -45,7 +45,7 @@ set(HBAS_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(../libhbas libhbas)
 
 add_executable(hogtied-ui src/main.c src/ui.c src/ui_audio.c src/ui_eq.c src/ui_media.c src/ui_gps.c
-  src/ui_map.c src/demo.c src/persist.c)
+  src/ui_map.c src/ui_kbd.c src/demo.c src/persist.c)
 target_link_libraries(hogtied-ui PRIVATE lvgl hbas m)
 if(HOGTIED_MAP)
   enable_language(CXX)

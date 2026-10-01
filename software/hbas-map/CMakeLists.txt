@@ -24,3 +24,8 @@ target_link_libraries(map-render-test PRIVATE hbasmap)
 add_executable(map-route-test tools/map-route-test.c)
 set_target_properties(map-route-test PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(map-route-test PRIVATE hbasmap m)
+
+# map-search-test: destination search, and time it
+add_executable(map-search-test tools/map-search-test.c)
+set_target_properties(map-search-test PROPERTIES LINKER_LANGUAGE CXX)
+target_link_libraries(map-search-test PRIVATE hbasmap)

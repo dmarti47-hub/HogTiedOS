@@ -71,6 +71,23 @@ int hbas_map_route(struct hbas_map *m, double from_lat, double from_lon, double 
 		   double to_lat, double to_lon, enum hbas_route_mode mode,
 		   struct hbas_route_info *info, char *err, size_t errlen);
 void hbas_map_clear_route(struct hbas_map *m);
+/* Copy the current route's points (up to max); returns how many it has. */
+size_t hbas_map_route_points(const struct hbas_map *m, double *lat, double *lon, size_t max);
+
+/*
+ * Address / place search in the map's location index, for the destination
+ * keyboard's autofill. query is free text ("canal st milwaukee",
+ * "400 w canal", "devils lake"); partial words match. Results are the best
+ * matches, nearest to near_lat/near_lon first among equally good ones.
+ * Returns how many were written to out (up to max), or -1 on error.
+ */
+#define HBAS_SEARCH_LABEL 64
+struct hbas_search_result {
+	char label[HBAS_SEARCH_LABEL];  /* "400 W Canal Street, Milwaukee" */
+	double lat, lon;
+};
+int hbas_map_search(struct hbas_map *m, const char *query, double near_lat, double near_lon,
+		    struct hbas_search_result *out, int max);
 
 /* Where lat/lon falls in the last render, in pixels; false if not rendered yet. */
 bool hbas_map_to_pixel(const struct hbas_map *m, double lat, double lon, double *x, double *y);

@@ -341,6 +341,8 @@ void ui_set_bike(int cfg)
 
 void ui_key(enum ui_key key)
 {
+	if (ui_kbd_key(key))
+		return;
 	if (ui_media_pairing_key(key))
 		return;
 	if (page == UI_PAGE_MAP && ui_map_key(key))

@@ -5,11 +5,16 @@
  * frame into the buffer that isn't on screen and the UI swaps it in, so
  * the screen never waits for the map.
  *
- * Navigation: OK opens the menu - saved places to route to, "Save this
- * spot", the route option (fastest, shortest, no highways, back roads),
- * north-up / heading-up, and stopping the route. Routes are calculated on
- * the map thread too and drawn in orange. Places and the route option are
- * kept in the places file (libhbas places.h) next to the settings.
+ * Navigation: OK opens the menu - find an address (on-screen keyboard with
+ * autofill from the map's address index), saved places (go / rename /
+ * delete), "Save this spot", the route option (fastest, shortest, no
+ * highways, back roads), north-up / heading-up, and stopping the route.
+ * Routes and searches run on the map thread too; the route is drawn in
+ * orange. While following it, the remaining distance and time count down,
+ * leaving the route recalculates it from where the bike is (libhbas
+ * route.h decides when), and reaching the end says so. Places and the route
+ * option are kept in the places file (libhbas places.h) next to the
+ * settings.
  *
  * Keys: Up / Down zoom in / out, OK opens the menu (in it: Up / Down
  * choose, OK selects, Back or Left closes). Left/Right switch pages (ui.c).
@@ -23,6 +28,7 @@
 #include <string.h>
 
 #include "hbas/places.h"
+#include "hbas/route.h"
 #include "hbas/settings.h"
 #include "persist.h"
 
@@ -49,20 +55,46 @@ static struct hbas_places places;
 static const char *places_path;
 
 /* the route being followed */
+#define ROUTE_POINTS_MAX 65536
 static struct {
-	bool active, busy;
+	bool active, busy, rerouting;
 	char name[HBAS_PLACE_NAME];
 	double lat, lon;
+	double trip_m, trip_s;         /* as calculated */
+	int mode;
+	double lat_pts[ROUTE_POINTS_MAX], lon_pts[ROUTE_POINTS_MAX];
+	struct hbas_route_line line;
+	struct hbas_route_follow follow;
 } dest;
 
-/* the menu: a list of items built when it opens */
-enum item_kind { IT_STOP, IT_PLACE, IT_SAVE_HERE, IT_MODE, IT_ORIENT };
-static struct { enum item_kind kind; int place; } items[HBAS_PLACES_MAX + 4];
-static int n_items, sel, menu_top;
+/* destination search (autofill) */
+#define SEARCH_MAX UI_KBD_SUGGESTIONS
+static struct {
+	char label[SEARCH_MAX][64];
+	double lat[SEARCH_MAX], lon[SEARCH_MAX];
+	int n, picked;
+} found;
+
+/* the menu: a list of items built when it opens; a place or a search
+ * result has its own small menu */
+enum menu_mode { MENU_MAIN, MENU_PLACE, MENU_RESULT };
+enum item_kind {
+	IT_STOP, IT_FIND, IT_PLACE, IT_SAVE_HERE, IT_MODE, IT_ORIENT,
+	IT_P_GO, IT_P_RENAME, IT_P_DELETE,
+	IT_R_GO, IT_R_SAVE_GO, IT_R_SAVE,
+	IT_BACK,
+};
+static struct { enum item_kind kind; int place; } items[HBAS_PLACES_MAX + 8];
+static int n_items, sel, menu_top, menu_place;
+static enum menu_mode menu_mode;
 static bool menu_open;
+static int renaming = -1;                  /* place being named on the keyboard */
 
 static void route_to(const char *name, double lat, double lon);
 static void clear_route(void);
+static void search(const char *query);
+static void open_menu_mode(enum menu_mode m);
+static void close_menu(void);
 
 static void show_info(void)
 {
@@ -79,6 +111,25 @@ static void show_route_banner(const char *text)
 	lv_obj_remove_flag(lbl_route, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* "189 km  2 h 07" / "800 m  3 min" */
+static void format_trip(char *buf, size_t len, double dist_m, double secs)
+{
+	int min = (int)lround(secs / 60);
+	char d[16], t[16];
+
+	if (dist_m < 1000)
+		snprintf(d, sizeof(d), "%d m", (int)lround(dist_m / 10) * 10);
+	else if (dist_m < 10000)
+		snprintf(d, sizeof(d), "%.1f km", dist_m / 1000);
+	else
+		snprintf(d, sizeof(d), "%d km", (int)lround(dist_m / 1000));
+	if (min < 60)
+		snprintf(t, sizeof(t), "%d min", min < 1 ? 1 : min);
+	else
+		snprintf(t, sizeof(t), "%d h %02d", min / 60, min % 60);
+	snprintf(buf, len, "%s  %s", d, t);
+}
+
 #ifdef HOGTIED_MAP
 #include <pthread.h>
 
@@ -92,18 +143,24 @@ static struct {
 	double lat, lon, rot, arrow;      /* arrow: bike direction on screen */
 	int level;
 	unsigned req_seq;
-	bool want_route, want_clear;
+	bool want_route, want_clear, want_search;
 	double from_lat, from_lon, heading, to_lat, to_lon;
 	int mode;
+	char query[64];
+	double near_lat, near_lon;
 	/* result (worker -> UI) */
-	bool route_done, route_ok;
+	bool route_done, route_ok, search_done;
 	char route_err[96];
 	struct hbas_route_info route;
+	size_t route_n;                    /* points in route_lat/lon */
+	struct hbas_search_result results[SEARCH_MAX];
+	int n_results;
 	int ready_buf;                     /* -1 none */
 	unsigned done_seq;
 	double ms;                         /* last render time */
 	bool failed;
 } job = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, .ready_buf = -1 };
+static double job_lat[ROUTE_POINTS_MAX], job_lon[ROUTE_POINTS_MAX];   /* under job.lock */
 
 static uint16_t buf[2][MAP_W * MAP_H];
 static lv_image_dsc_t dsc[2];
@@ -170,7 +227,8 @@ static void *worker_main(void *arg)
 		struct timespec t0, t1;
 		bool ok;
 
-		while (!job.want && !job.want_route && !job.want_clear && !job.stop)
+		while (!job.want && !job.want_route && !job.want_clear && !job.want_search &&
+		       !job.stop)
 			pthread_cond_wait(&job.wake, &job.lock);
 		if (job.stop)
 			break;
@@ -191,12 +249,36 @@ static void *worker_main(void *arg)
 			rc = hbas_map_route(map, f_lat, f_lon, hd, t_lat, t_lon,
 					    (enum hbas_route_mode)mode, &info, err, sizeof(err));
 			pthread_mutex_lock(&job.lock);
+			if (rc == 0) {
+				size_t n = hbas_map_route_points(map, job_lat, job_lon,
+								 ROUTE_POINTS_MAX);
+
+				job.route_n = n < ROUTE_POINTS_MAX ? n : ROUTE_POINTS_MAX;
+			}
 			job.route_done = true;
 			job.route_ok = rc == 0;
 			job.route = info;
 			snprintf(job.route_err, sizeof(job.route_err), "%s", err);
 			job.want = true;               /* draw it */
 			continue;                      /* a newer request may be waiting */
+		}
+		if (job.want_search) {
+			char q[sizeof(job.query)];
+			double nl = job.near_lat, nn = job.near_lon;
+			struct hbas_search_result r[SEARCH_MAX];
+			int n;
+
+			job.want_search = false;
+			snprintf(q, sizeof(q), "%s", job.query);
+			pthread_mutex_unlock(&job.lock);
+			n = hbas_map_search(map, q, nl, nn, r, SEARCH_MAX);
+			pthread_mutex_lock(&job.lock);
+			if (!job.want_search) {        /* else: typed on, that one's newer */
+				job.n_results = n < 0 ? 0 : n;
+				memcpy(job.results, r, sizeof(r));
+				job.search_done = true;
+			}
+			continue;
 		}
 		job.want = false;
 		job.drawing = true;
@@ -256,10 +338,12 @@ static void route_to(const char *name, double lat, double lon)
 		show_route_banner("Can't route without a GPS fix");
 		return;
 	}
-	snprintf(dest.name, sizeof(dest.name), "%s", name);
+	if (name != dest.name)
+		snprintf(dest.name, sizeof(dest.name), "%s", name);
 	dest.lat = lat;
 	dest.lon = lon;
 	dest.busy = true;
+	dest.mode = places.route;
 	pthread_mutex_lock(&job.lock);
 	job.from_lat = gps.lat;
 	job.from_lon = gps.lon;
@@ -270,13 +354,32 @@ static void route_to(const char *name, double lat, double lon)
 	job.want_route = true;
 	pthread_cond_signal(&job.wake);
 	pthread_mutex_unlock(&job.lock);
-	snprintf(text, sizeof(text), "Routing to %s...", dest.name);
+	snprintf(text, sizeof(text), "%s %s...", dest.rerouting ? "Off route, rerouting to" :
+		 "Routing to", dest.name);
 	show_route_banner(text);
+}
+
+static void search(const char *query)
+{
+	if (!have_worker)
+		return;
+	pthread_mutex_lock(&job.lock);
+	snprintf(job.query, sizeof(job.query), "%s", query);
+	/* no fix yet: search around the middle of nowhere in particular */
+	job.near_lat = gps.valid ? gps.lat : 0;
+	job.near_lon = gps.valid ? gps.lon : 0;
+	job.want_search = query[0] != '\0';
+	if (!job.want_search) {
+		job.n_results = 0;
+		job.search_done = true;
+	}
+	pthread_cond_signal(&job.wake);
+	pthread_mutex_unlock(&job.lock);
 }
 
 static void clear_route(void)
 {
-	dest.active = dest.busy = false;
+	dest.active = dest.busy = dest.rerouting = false;
 	show_route_banner(NULL);
 	if (!have_worker)
 		return;
@@ -286,24 +389,6 @@ static void clear_route(void)
 	pthread_mutex_unlock(&job.lock);
 }
 
-/* "189 km  2 h 07" / "800 m  3 min" */
-static void format_trip(char *buf, size_t len, const struct hbas_route_info *r)
-{
-	int min = (int)lround(r->duration_s / 60);
-	char d[16], t[16];
-
-	if (r->distance_m < 1000)
-		snprintf(d, sizeof(d), "%d m", (int)lround(r->distance_m / 10) * 10);
-	else if (r->distance_m < 10000)
-		snprintf(d, sizeof(d), "%.1f km", r->distance_m / 1000);
-	else
-		snprintf(d, sizeof(d), "%d km", (int)lround(r->distance_m / 1000));
-	if (min < 60)
-		snprintf(t, sizeof(t), "%d min", min < 1 ? 1 : min);
-	else
-		snprintf(t, sizeof(t), "%d h %02d", min / 60, min % 60);
-	snprintf(buf, len, "%s  %s", d, t);
-}
 
 void ui_map_open(const char *db, const char *style, const char *font)
 {
@@ -345,7 +430,7 @@ bool ui_map_idle(void)
 		return true;
 	pthread_mutex_lock(&job.lock);
 	idle = !job.want && !job.drawing && !job.want_route && !job.want_clear && !job.route_done &&
-	       job.ready_buf < 0;
+	       !job.want_search && !job.search_done && job.ready_buf < 0;
 	pthread_mutex_unlock(&job.lock);
 	return idle && !dest.busy;
 }
@@ -378,17 +463,46 @@ void ui_map_tick(void)
 		job.route_done = false;
 		if (dest.busy) {
 			dest.busy = false;
-			dest.active = job.route_ok;
 			if (job.route_ok) {
-				format_trip(trip, sizeof(trip), &job.route);
+				dest.active = true;
+				dest.trip_m = job.route.distance_m;
+				dest.trip_s = job.route.duration_s;
+				memcpy(dest.lat_pts, job_lat, job.route_n * sizeof(double));
+				memcpy(dest.lon_pts, job_lon, job.route_n * sizeof(double));
+				hbas_route_line_init(&dest.line, dest.lat_pts, dest.lon_pts,
+						     job.route_n);
+				if (!dest.rerouting)
+					hbas_route_follow_reset(&dest.follow);
+				dest.follow.off_count = 0;
+				format_trip(trip, sizeof(trip), dest.trip_m, dest.trip_s);
 				snprintf(text, sizeof(text), "To %s\n%s  %s", dest.name, trip,
-					 mode_names[job.mode]);
+					 mode_names[dest.mode]);
+			} else if (dest.rerouting && dest.active) {
+				/* keep following the old one; try again later */
+				snprintf(text, sizeof(text), "Off route to %s:\n%s", dest.name,
+					 job.route_err);
 			} else {
+				dest.active = false;
 				snprintf(text, sizeof(text), "No route to %s:\n%s", dest.name,
 					 job.route_err);
 			}
+			dest.rerouting = false;
 			show_route_banner(text);
 		}
+	}
+	if (job.search_done) {
+		const char *labels[SEARCH_MAX];
+
+		job.search_done = false;
+		found.n = job.n_results;
+		for (int i = 0; i < found.n; i++) {
+			snprintf(found.label[i], sizeof(found.label[i]), "%s", job.results[i].label);
+			found.lat[i] = job.results[i].lat;
+			found.lon[i] = job.results[i].lon;
+			labels[i] = found.label[i];
+		}
+		if (ui_kbd_active() && renaming < 0)
+			ui_kbd_suggest(labels, found.n);
 	}
 	if (job.ready_buf >= 0) {
 		ready = job.ready_buf;
@@ -421,6 +535,11 @@ static void route_to(const char *name, double lat, double lon)
 	(void)name; (void)lat; (void)lon;
 }
 static void clear_route(void) {}
+static void search(const char *query)
+{
+	(void)query;
+}
+
 #endif
 
 /* ---- saved places ------------------------------------------------------- */
@@ -458,32 +577,61 @@ void ui_map_add_place(const char *name, double lat, double lon)
 
 static void item_text(int i, char *buf, size_t len)
 {
+	const struct hbas_place *pl = &places.place[menu_place];
+
 	switch (items[i].kind) {
 	case IT_STOP: snprintf(buf, len, "Stop route to %s", dest.name); break;
-	case IT_PLACE: snprintf(buf, len, "Go to %s", places.place[items[i].place].name); break;
+	case IT_FIND: snprintf(buf, len, "Find address"); break;
+	case IT_PLACE: snprintf(buf, len, "%s", places.place[items[i].place].name); break;
 	case IT_SAVE_HERE: snprintf(buf, len, "Save this spot"); break;
 	case IT_MODE: snprintf(buf, len, "Route: < %s >", mode_names[places.route]); break;
 	case IT_ORIENT: snprintf(buf, len, "Map: %s", heading_up ? "Heading up" : "North up"); break;
+	case IT_P_GO: snprintf(buf, len, "Go to %s", pl->name); break;
+	case IT_P_RENAME: snprintf(buf, len, "Rename"); break;
+	case IT_P_DELETE: snprintf(buf, len, "Delete"); break;
+	case IT_R_GO: snprintf(buf, len, "Go to %s", found.label[found.picked]); break;
+	case IT_R_SAVE_GO: snprintf(buf, len, "Save as a place and go"); break;
+	case IT_R_SAVE: snprintf(buf, len, "Save as a place"); break;
+	case IT_BACK: snprintf(buf, len, "Back"); break;
 	}
 }
+
+#define ADD(k, p) (items[n_items++] = (typeof(items[0])){ (k), (p) })
 
 static void build_items(void)
 {
 	n_items = 0;
-	if (dest.active || dest.busy)
-		items[n_items++] = (typeof(items[0])){ IT_STOP, -1 };
-	for (int i = 0; i < places.count; i++)
-		items[n_items++] = (typeof(items[0])){ IT_PLACE, i };
-	items[n_items++] = (typeof(items[0])){ IT_SAVE_HERE, -1 };
-	items[n_items++] = (typeof(items[0])){ IT_MODE, -1 };
-	items[n_items++] = (typeof(items[0])){ IT_ORIENT, -1 };
+	switch (menu_mode) {
+	case MENU_MAIN:
+		if (dest.active || dest.busy)
+			ADD(IT_STOP, -1);
+		ADD(IT_FIND, -1);
+		for (int i = 0; i < places.count; i++)
+			ADD(IT_PLACE, i);
+		ADD(IT_SAVE_HERE, -1);
+		ADD(IT_MODE, -1);
+		ADD(IT_ORIENT, -1);
+		break;
+	case MENU_PLACE:
+		ADD(IT_P_GO, -1);
+		ADD(IT_P_RENAME, -1);
+		ADD(IT_P_DELETE, -1);
+		ADD(IT_BACK, -1);
+		break;
+	case MENU_RESULT:
+		ADD(IT_R_GO, -1);
+		ADD(IT_R_SAVE_GO, -1);
+		ADD(IT_R_SAVE, -1);
+		ADD(IT_BACK, -1);
+		break;
+	}
 	if (sel >= n_items)
 		sel = n_items - 1;
 }
 
 static void show_menu(void)
 {
-	char text[64];
+	char text[96];
 
 	if (sel < menu_top)
 		menu_top = sel;
@@ -505,8 +653,9 @@ static void show_menu(void)
 	lv_obj_set_height(menu, (n_items < MENU_ROWS ? n_items : MENU_ROWS) * 24 + 10);
 }
 
-static void open_menu(void)
+static void open_menu_mode(enum menu_mode m)
 {
+	menu_mode = m;
 	sel = menu_top = 0;
 	build_items();
 	menu_open = true;
@@ -529,29 +678,96 @@ static void change_mode(int d)
 	show_menu();
 }
 
+/* keyboard finished naming a place (new spot or rename) */
+static void name_done(enum ui_kbd_result r, const char *text, int pick)
+{
+	(void)pick;
+	if (r == UI_KBD_OK && text[0] && renaming >= 0 && renaming < places.count) {
+		char name[HBAS_PLACE_NAME];
+		size_t n;
+
+		snprintf(name, sizeof(name), "%s", text);
+		n = strlen(name);
+		while (n && name[n - 1] == ' ')
+			name[--n] = '\0';
+		if (n) {
+			/* same cleaning as a new place (no commas or newlines) */
+			struct hbas_places tmp;
+
+			hbas_places_init(&tmp);
+			hbas_places_add(&tmp, name, 0, 0);
+			snprintf(places.place[renaming].name, HBAS_PLACE_NAME, "%s",
+				 tmp.place[0].name);
+			save_places();
+		}
+	}
+	renaming = -1;
+	open_menu_mode(MENU_MAIN);
+}
+
+static void rename_place(int i)
+{
+	renaming = i;
+	close_menu();
+	ui_kbd_open("Name this place", places.place[i].name, NULL, name_done);
+}
+
+/* keyboard finished the address search */
+static void find_done(enum ui_kbd_result r, const char *text, int pick)
+{
+	(void)text;
+	if (r == UI_KBD_OK && found.n > 0)
+		pick = 0;                          /* OK takes the best match */
+	if ((r == UI_KBD_PICK || r == UI_KBD_OK) && pick >= 0 && pick < found.n) {
+		found.picked = pick;
+		open_menu_mode(MENU_RESULT);
+		return;
+	}
+	open_menu_mode(MENU_MAIN);
+}
+
+/* a search result's short name for the places list: up to the comma */
+static int save_result(void)
+{
+	char name[HBAS_PLACE_NAME];
+	const char *label = found.label[found.picked];
+	const char *comma = strchr(label, ',');
+
+	snprintf(name, sizeof(name), "%.*s", comma ? (int)(comma - label) : (int)strlen(label),
+		 label);
+	if (hbas_places_add(&places, name, found.lat[found.picked], found.lon[found.picked]) < 0) {
+		show_route_banner("The saved places list is full");
+		return -1;
+	}
+	save_places();
+	return places.count - 1;
+}
+
 static void select_item(void)
 {
 	char name[HBAS_PLACE_NAME];
+	int i;
 
 	switch (items[sel].kind) {
 	case IT_STOP:
 		clear_route();
 		close_menu();
 		break;
-	case IT_PLACE: {
-		const struct hbas_place *pl = &places.place[items[sel].place];
-
-		route_to(pl->name, pl->lat, pl->lon);
+	case IT_FIND:
 		close_menu();
+		found.n = 0;
+		ui_kbd_open("Find address: town, street or both", "", search, find_done);
 		break;
-	}
+	case IT_PLACE:
+		menu_place = items[sel].place;
+		open_menu_mode(MENU_PLACE);
+		break;
 	case IT_SAVE_HERE:
 		if (!gps.valid) {
 			show_route_banner("Can't save a spot without a GPS fix");
 			close_menu();
 			break;
 		}
-		/* named by number for now; the on-screen keyboard will rename */
 		snprintf(name, sizeof(name), "Spot %d", places.count + 1);
 		if (hbas_places_add(&places, name, gps.lat, gps.lon) < 0) {
 			show_route_banner("The saved places list is full");
@@ -559,8 +775,7 @@ static void select_item(void)
 			break;
 		}
 		save_places();
-		build_items();
-		show_menu();
+		rename_place(places.count - 1);    /* Cancel keeps "Spot N" */
 		break;
 	case IT_MODE:
 		change_mode(1);
@@ -570,6 +785,38 @@ static void select_item(void)
 		show_info();
 		request();
 		show_menu();
+		break;
+	case IT_P_GO:
+		route_to(places.place[menu_place].name, places.place[menu_place].lat,
+			 places.place[menu_place].lon);
+		close_menu();
+		break;
+	case IT_P_RENAME:
+		rename_place(menu_place);
+		break;
+	case IT_P_DELETE:
+		hbas_places_remove(&places, menu_place);
+		save_places();
+		open_menu_mode(MENU_MAIN);
+		break;
+	case IT_R_GO:
+		snprintf(name, sizeof(name), "%s", found.label[found.picked]);
+		route_to(name, found.lat[found.picked], found.lon[found.picked]);
+		close_menu();
+		break;
+	case IT_R_SAVE_GO:
+		if ((i = save_result()) >= 0)
+			route_to(places.place[i].name, places.place[i].lat, places.place[i].lon);
+		close_menu();
+		break;
+	case IT_R_SAVE:
+		if (save_result() >= 0)
+			open_menu_mode(MENU_MAIN);
+		else
+			close_menu();
+		break;
+	case IT_BACK:
+		open_menu_mode(MENU_MAIN);
 		break;
 	}
 }
@@ -594,6 +841,8 @@ static bool menu_key(enum ui_key key)
 	case UI_KEY_LEFT:
 		if (items[sel].kind == IT_MODE)
 			change_mode(-1);
+		else if (menu_mode != MENU_MAIN)
+			open_menu_mode(MENU_MAIN);
 		else
 			close_menu();
 		break;
@@ -601,7 +850,10 @@ static bool menu_key(enum ui_key key)
 		select_item();
 		break;
 	case UI_KEY_BACK:
-		close_menu();
+		if (menu_mode != MENU_MAIN)
+			open_menu_mode(MENU_MAIN);
+		else
+			close_menu();
 		break;
 	}
 	return true;                            /* the menu takes every key */
@@ -678,6 +930,36 @@ void ui_map_build(lv_obj_t *p)
 	show_info();
 }
 
+/* Each fix while following a route: count down, reroute, or arrive. */
+static void follow_route(void)
+{
+	struct hbas_route_pos pos;
+	char text[160], trip[40];
+	/* HDOP x ~5 m is a rough horizontal error for a u-blox 5/6 */
+	double accuracy = gps.hdop > 0 ? gps.hdop * 5.0 : 0;
+
+	switch (hbas_route_follow(&dest.follow, &dest.line, gps.lat, gps.lon, accuracy,
+				  lv_tick_get(), &pos)) {
+	case HBAS_ROUTE_ARRIVED:
+		snprintf(text, sizeof(text), "Arrived at %s", dest.name);
+		clear_route();
+		show_route_banner(text);
+		break;
+	case HBAS_ROUTE_REROUTE:
+		dest.rerouting = true;
+		route_to(dest.name, dest.lat, dest.lon);
+		break;
+	case HBAS_ROUTE_ON:
+		format_trip(trip, sizeof(trip), pos.remaining_m,
+			    dest.line.total_m > 0 ?
+			    dest.trip_s * pos.remaining_m / dest.line.total_m : 0);
+		snprintf(text, sizeof(text), "To %s\n%s  %s", dest.name, trip,
+			 mode_names[dest.mode]);
+		show_route_banner(text);
+		break;
+	}
+}
+
 void ui_map_gps(const struct hbas_gps_view *v)
 {
 	bool was_valid = gps.valid;
@@ -686,6 +968,8 @@ void ui_map_gps(const struct hbas_gps_view *v)
 	if (!gps.valid && was_valid)
 		lv_label_set_text(lbl_note, "Waiting for a GPS fix...");
 	request();
+	if (gps.valid && dest.active && !dest.busy && dest.line.n >= 2)
+		follow_route();
 }
 
 bool ui_map_key(enum ui_key key)
@@ -695,7 +979,7 @@ bool ui_map_key(enum ui_key key)
 	switch (key) {
 	case UI_KEY_UP: if (level < LEVEL_MAX) level++; break;
 	case UI_KEY_DOWN: if (level > LEVEL_MIN) level--; break;
-	case UI_KEY_ENTER: open_menu(); return true;
+	case UI_KEY_ENTER: open_menu_mode(MENU_MAIN); return true;
 	default: return false;
 	}
 	show_info();

@@ -21,6 +21,7 @@
 /* Target framebuffer backend (-DHOGTIED_FBDEV=ON) */
 #ifdef HOGTIED_FBDEV
 #define LV_USE_LINUX_FBDEV    1
+#define LV_USE_EVDEV          1           /* touchscreen (--touch) */
 #endif
 
 /* PC desktop window backend (-DHOGTIED_SDL=ON) */

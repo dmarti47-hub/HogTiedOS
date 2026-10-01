@@ -25,7 +25,7 @@ KEEP = [
     r'waterway_(river|riverbank|canal|dock)', r'natural_(water|bay|strait)',
     r'landuse_(reservoir|basin)',
     # borders and places
-    r'boundary_(country|state|administrative)',
+    r'boundary_(country|state|administrative|county|municipality|suburb)',   # region index needs these
     r'place_(continent|country|state|region|capitalcity|millioncity|halfmillioncity|bigcity'
     r'|city|town|village|hamlet|suburb|locality|island|islet|sea|ocean)',
     # search and the rider's essentials
