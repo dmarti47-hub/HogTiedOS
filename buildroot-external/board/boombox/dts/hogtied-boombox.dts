@@ -207,18 +207,23 @@
  * GPIO137 (gpio5 bits 8/9): the IPL muxes exactly those two pads (0x2164,
  * 0x2166, mmc2_dat4/5) to GPIO mode as inputs. Which one is REQ vs ACK is
  * not established.
- * TODO: unconfirmed - SPI mode word 0x608 (bring-up report decodes it as
- * mode 1, 8-bit, MSB first; not verified here); dev-ipc framing (report
- * gives A1/A2 read/write framing; not verified). Devices disabled.
+ * [confirmed] SPI mode 3 / 750 kHz and the dev-ipc framing, from the stock
+ * binaries (CROSS_CHECKS.md sec. 12). CS0 is driven by hbas-iocd. The
+ * second 78K0R on CS1 isn't used by stock dev-ipc (-C0); left disabled.
+ * TODO: unconfirmed - REQ/ACK edge polarity (iocd uses both edges).
  */
 &mcspi3 {
 	status = "okay";
 
+	/* [confirmed] stock spi-omap3530 programs mode 3 (CPOL=1, CPHA=1) at
+	 * 750 kHz for this bus (CROSS_CHECKS.md sec. 12). No kernel driver:
+	 * S80hbas-iocd binds it to spidev through driver_override. */
 	front_ctrl: mcu@0 {
-		compatible = "hogtied,dev-ipc";		/* placeholder, no driver */
+		compatible = "hogtied,dev-ipc";
 		reg = <0>;
-		spi-max-frequency = <1000000>;
-		status = "disabled";
+		spi-max-frequency = <750000>;
+		spi-cpol;
+		spi-cpha;
 	};
 
 	ioc: mcu@1 {

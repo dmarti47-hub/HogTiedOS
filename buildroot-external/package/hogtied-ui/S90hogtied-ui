@@ -1,7 +1,7 @@
 #!/bin/sh
 # Start the HogTiedOS main screen on the framebuffer.
-# No data source is passed: until the IOC driver exists the screen shows "--"
-# placeholders. Never start it with --demo on a bike: that shows fake data.
+# Bike data comes from hbas-iocd via vcan0 (shows "--" until frames arrive).
+# Never start it with --demo on a bike: that shows fake data.
 
 DAEMON=/usr/bin/hogtied-ui
 PIDFILE=/var/run/hogtied-ui.pid
@@ -11,7 +11,7 @@ start)
 	printf "Starting hogtied-ui: "
 	# keep the framebuffer console cursor from blinking over the UI
 	echo 0 > /sys/class/graphics/fbcon/cursor_blink 2>/dev/null
-	start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON" && echo OK || echo FAIL
+	start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON" -- --can vcan0 && echo OK || echo FAIL
 	;;
 stop)
 	printf "Stopping hogtied-ui: "

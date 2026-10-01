@@ -1,0 +1,51 @@
+#!/bin/sh
+# Start the IOC link daemon. It keeps the unit powered (answers the IOC's
+# keep-alive) and feeds bike data to vcan0 for hogtied-ui.
+
+DAEMON=/usr/bin/hbas-iocd
+PIDFILE=/var/run/hbas-iocd.pid
+SPI_CTRL=480b8000          # McSPI3, the IOC bus
+
+ioc_spidev() {
+	# Bind the IOC node on McSPI3 (CS0) to spidev and print its /dev path.
+	for d in /sys/bus/spi/devices/spi*.0; do
+		[ -e "$d" ] || continue
+		case "$(readlink -f "$d/of_node")" in
+		*"$SPI_CTRL"*) ;;
+		*) continue ;;
+		esac
+		dev=$(basename "$d")
+		echo spidev > "$d/driver_override"
+		[ -e "$d/driver" ] || echo "$dev" > /sys/bus/spi/drivers/spidev/bind
+		echo "/dev/spidev${dev#spi}"
+		return 0
+	done
+	return 1
+}
+
+case "$1" in
+start)
+	printf "Starting hbas-iocd: "
+	ip link add dev vcan0 type vcan 2>/dev/null
+	ip link set vcan0 up
+	if ! SPIDEV=$(ioc_spidev); then
+		echo "FAIL (no spi device on $SPI_CTRL)"
+		exit 1
+	fi
+	start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON" -- -s "$SPIDEV" -c vcan0 \
+		&& echo OK || echo FAIL
+	;;
+stop)
+	printf "Stopping hbas-iocd: "
+	start-stop-daemon -K -p "$PIDFILE" && echo OK || echo FAIL
+	rm -f "$PIDFILE"
+	;;
+restart)
+	"$0" stop
+	"$0" start
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+	;;
+esac

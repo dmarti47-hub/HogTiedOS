@@ -22,6 +22,10 @@ CONFIG_DRM_FBDEV_EMULATION=y
 CONFIG_FB=y
 CONFIG_REGULATOR_FIXED_VOLTAGE=y
 
+# --- IOC link (hbas-iocd): spidev on McSPI3, vcan for bike data to the UI --
+CONFIG_SPI_SPIDEV=y
+CONFIG_CAN_VCAN=y
+
 # --- Image size: the IFS slot is 42 MiB and the IPL read limit is unknown --
 # (ifsSizeInMB / set-ifs-size, see CROSS_CHECKS.md sec. 6). Keep it small.
 # Kernel compression is set by BR2_LINUX_KERNEL_XZ in the defconfig

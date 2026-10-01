@@ -1,0 +1,7 @@
+config BR2_PACKAGE_HBAS_IOCD
+	bool "hbas-iocd"
+	help
+	  IOC (front/IO controller) link daemon: answers the IOC's power
+	  keep-alive like the stock firmware, handles shutdown requests,
+	  and forwards bike CAN frames to a SocketCAN interface (vcan0).
+	  Sources live in software/iocd in the HogTiedOS repository.

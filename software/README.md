@@ -4,6 +4,7 @@
 |---|---|
 | `libhbas/` | C decoder for the bike's CAN messages, field for field from Harley's own `vehicleCAN.lua` (`docs/findings/CROSS_CHECKS.md` sec. 11). No UI or I/O. |
 | `hogtied-ui/` | The main screen, 400x240, LVGL 9.2.2: speed, gear, rpm, warning lights, clock, ambient temperature, tire data. |
+| `iocd/` | `hbas-iocd`: the IOC link on the unit. Answers the power keep-alive, handles shutdown, and forwards bike CAN frames to `vcan0` for the UI. |
 
 Both are built into the image by Buildroot (`buildroot-external/package/hogtied-ui`).
 
@@ -34,11 +35,13 @@ so no display is needed. Built with `-DHOGTIED_FBDEV=ON`, it drives
 
 - **Real:** decoding. Every field layout comes from the stock decoder, and the
   tests cover each message, error values and short frames.
-- **Not yet:** the path the data takes on the unit. Stock software gets bike
-  frames from the front/IOC controller on IPC channel 4, and the IOC link
-  protocol isn't implemented. On the unit the screen shows `--` until it is.
+- **Written, not hardware-tested:** the IOC link (`libhbas/ioc.c` + `iocd`).
+  The protocol is verified against stock `dev-ipc` and the stock Lua services
+  (CROSS_CHECKS sec. 12), and the tests run against a simulated IOC. On the
+  unit: `hbas-iocd` → `vcan0` → `hogtied-ui --can vcan0`. Unknown until
+  hardware: the REQ/ACK edge polarity (both edges are used).
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.
-- **Handlebar buttons:** these arrive over the IOC link too. Until then, pages
-  change with `--stdin-keys`.
+- **Handlebar buttons:** these arrive on IOC channel 3, which iocd only logs
+  for now. Until they're decoded, pages change with `--stdin-keys`.

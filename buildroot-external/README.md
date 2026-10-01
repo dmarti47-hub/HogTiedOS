@@ -39,6 +39,7 @@ board/boombox/
   patches/linux/0001-*.patch        keep the kernel off the DRAM controller
 package/hogtied-ui                  main screen (software/hogtied-ui + libhbas)
 package/hogtied-lvgl                LVGL 9.2.2 source for hogtied-ui
+package/hbas-iocd                   IOC link daemon (software/iocd + libhbas)
 ```
 
 ## Safety properties built into this tree
@@ -60,7 +61,7 @@ package/hogtied-lvgl                LVGL 9.2.2 source for hogtied-ui
   IDCODE print on the first UART boot.
 - Pin settings are applied as one block per pin controller (exactly the
   IPL's table), not yet split per device.
-- The IOC link (bike data, handlebar buttons, power heartbeat) isn't
-  implemented, so the screen shows `--` on the unit.
+- The IOC link daemon (`hbas-iocd`) is untested on hardware. REQ/ACK edge
+  polarity is unknown, and handlebar buttons (channel 3) aren't decoded yet.
 - Display pixel clock is unresolved (pcd=8 vs refresh=60).
 - The DSP and IOC SPI devices are placeholders with no drivers.
