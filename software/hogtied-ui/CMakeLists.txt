@@ -43,7 +43,7 @@ endif()
 set(HBAS_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(../libhbas libhbas)
 
-add_executable(hogtied-ui src/main.c src/ui.c src/demo.c)
+add_executable(hogtied-ui src/main.c src/ui.c src/ui_audio.c src/demo.c)
 target_link_libraries(hogtied-ui PRIVATE lvgl hbas m)
 target_compile_options(hogtied-ui PRIVATE -Wall -Wextra -Werror)
 install(TARGETS hogtied-ui RUNTIME DESTINATION bin)

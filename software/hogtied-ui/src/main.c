@@ -117,18 +117,66 @@ static void run_to(uint32_t until_ms)
 	}
 }
 
+/* ---- audio backend ------------------------------------------------------ */
+
+/*
+ * Until the SigmaDSP parameter map for volume/tone/fade is known (bench
+ * capture, docs/findings/AUDIO.md), settings are only logged.
+ */
+static bool audio_log_quiet;
+
+static void log_apply(void *ctx, const struct hbas_audio_db *db, bool muted,
+		      enum hbas_audio_output out)
+{
+	(void)ctx;
+	if (!audio_log_quiet)
+		fprintf(stderr, "audio: out=%d vol=%d dB bass=%d dB treble=%d dB "
+			"fade front=%d rear=%d dB%s (not sent: DSP map unknown)\n",
+			out, db->volume_db, db->bass_db, db->treble_db,
+			db->fade_front_db, db->fade_rear_db, muted ? " MUTED" : "");
+}
+
+static void log_eq(void *ctx, const char *name)
+{
+	(void)ctx;
+	if (!audio_log_quiet)
+		fprintf(stderr, "audio: EQ profile %s (not sent: DSP map unknown)\n", name);
+}
+
+static const struct hbas_audio_backend log_backend = { NULL, log_apply, log_eq };
+
+static void press_keys(const char *keys)
+{
+	for (; *keys; keys++) {
+		switch (*keys) {
+		case 'L': ui_key(UI_KEY_LEFT); break;
+		case 'R': ui_key(UI_KEY_RIGHT); break;
+		case 'U': ui_key(UI_KEY_UP); break;
+		case 'D': ui_key(UI_KEY_DOWN); break;
+		case 'E': ui_key(UI_KEY_ENTER); break;
+		case 'B': ui_key(UI_KEY_BACK); break;
+		}
+	}
+}
+
 static int snapshot(const char *prefix)
 {
 	static uint16_t buf[UI_WIDTH * UI_HEIGHT];
-	static const struct { uint32_t t; enum ui_key key; bool press; const char *name; } script[] = {
-		{ 500, 0, false, "01-key-on" },
-		{ 11000, 0, false, "02-accelerating" },
-		{ 22000, 0, false, "03-cruise-low-fuel" },
-		{ 22100, UI_KEY_RIGHT, true, "04-tires" },
-		{ 22200, UI_KEY_RIGHT, true, "05-system" },
-		{ 22300, UI_KEY_BACK, true, "06-back-to-dash" },
+	/* keys: L/R/U/D = arrows, E = enter, B = back */
+	static const struct { uint32_t t; const char *keys; const char *name; } script[] = {
+		{ 500, "", "01-key-on" },
+		{ 11000, "", "02-accelerating" },
+		{ 22000, "", "03-cruise-low-fuel" },
+		{ 22100, "R", "04-audio" },
+		{ 22200, "DERRR", "05-audio-bass-adjust" },        /* bass +3 steps */
+		{ 22300, "EDDDER", "06-audio-driver-headset" },    /* output -> headset, fade hides */
+		{ 22400, "ER", "07-tires" },
+		{ 22500, "R", "08-system" },
+		{ 22600, "B", "09-back-to-dash" },
 		/* same bike reporting itself as a trike: third tire appears */
-		{ 22400, UI_KEY_RIGHT, true, "07-tires-trike" },
+		{ 22700, "RR", "10-tires-trike" },
+		/* 2-speaker bike, back on speakers: no fade row */
+		{ 22800, "BRELLE", "11-audio-2-speakers" },
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
 	char path[512];
@@ -137,12 +185,15 @@ static int snapshot(const char *prefix)
 	lv_display_set_buffers(d, buf, NULL, sizeof(buf), LV_DISPLAY_RENDER_MODE_FULL);
 	lv_display_set_flush_cb(d, snap_flush);
 	ui_create();
+	audio_log_quiet = true;
+	ui_set_audio_backend(&log_backend);
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
-		if (!strcmp(script[i].name, "07-tires-trike"))
+		if (!strcmp(script[i].name, "10-tires-trike"))
 			demo_set_trike(1);
+		if (!strcmp(script[i].name, "11-audio-2-speakers"))
+			ui_set_speaker_count(2);
 		run_to(script[i].t);
-		if (script[i].press)
-			ui_key(script[i].key);
+		press_keys(script[i].keys);
 		ui_update(&vehicle);
 		lv_obj_invalidate(lv_screen_active());
 		lv_refr_now(d);
@@ -349,7 +400,7 @@ static lv_display_t *create_display(const char *fbdev)
 #endif
 
 static int run_live(const char *fbdev, bool demo, const char *replay, const char *can,
-		    bool stdin_keys)
+		    bool stdin_keys, int speakers)
 {
 #if defined(HOGTIED_FBDEV) || defined(HOGTIED_SDL)
 	FILE *rf = NULL;
@@ -371,6 +422,8 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 	signal(SIGINT, on_stop_signal);
 	signal(SIGTERM, on_stop_signal);
 	create_display(fbdev);
+	ui_set_speaker_count(speakers);
+	ui_set_audio_backend(&log_backend);
 	/* window closed -> display deleted; Ctrl+C / SIGTERM -> stop_requested */
 	while (!stop_requested && lv_display_get_default()) {
 		uint32_t now = tick_ms() - start;
@@ -403,7 +456,7 @@ static int run_live(const char *fbdev, bool demo, const char *replay, const char
 	}
 	return 0;
 #else
-	(void)fbdev; (void)demo; (void)replay; (void)can; (void)stdin_keys;
+	(void)fbdev; (void)demo; (void)replay; (void)can; (void)stdin_keys; (void)speakers;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
 	(void)open_buttons; (void)poll_buttons;
 	fprintf(stderr, "built without a display backend; use --snapshot\n");
@@ -415,10 +468,13 @@ int main(int argc, char **argv)
 {
 	const char *fbdev = "/dev/fb0", *snap = NULL, *replay = NULL, *can = NULL;
 	bool demo = false, stdin_keys = false;
+	int speakers = 4;
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--demo"))
 			demo = true;
+		else if (!strcmp(argv[i], "--speakers") && i + 1 < argc)
+			speakers = atoi(argv[++i]) == 2 ? 2 : 4;
 		else if (!strcmp(argv[i], "--stdin-keys"))
 			stdin_keys = true;
 		else if (!strcmp(argv[i], "--fb") && i + 1 < argc)
@@ -431,7 +487,7 @@ int main(int argc, char **argv)
 			can = argv[++i];
 		else {
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
-				"[--fb DEV] [--stdin-keys] | --snapshot PREFIX\n", argv[0]);
+				"[--fb DEV] [--stdin-keys] [--speakers 2|4] | --snapshot PREFIX\n", argv[0]);
 			return 2;
 		}
 	}
@@ -442,5 +498,5 @@ int main(int argc, char **argv)
 #endif
 	lv_init();
 	lv_tick_set_cb(tick_ms);
-	return snap ? snapshot(snap) : run_live(fbdev, demo, replay, can, stdin_keys);
+	return snap ? snapshot(snap) : run_live(fbdev, demo, replay, can, stdin_keys, speakers);
 }

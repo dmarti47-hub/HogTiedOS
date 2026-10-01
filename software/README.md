@@ -10,6 +10,8 @@ Both are built into the image by Buildroot (`buildroot-external/package/hogtied-
 
 ![Demo ride rendered offline](../docs/screenshots/ui-demo.png)
 
+![Audio page](../docs/screenshots/ui-audio.png)
+
 ## Running the screen on your PC
 
 One-time setup (Ubuntu / Debian / Pop!_OS):
@@ -29,8 +31,10 @@ right away. A window opens with the screen at 2x size, playing a demo ride.
 
 | Key | Does |
 |---|---|
-| Left / Right arrows | change page (Dash, Tires, System) |
-| Esc | back to Dash |
+| Left / Right arrows | change page (Dash, Audio, Tires, System) |
+| Up / Down | on Audio: pick a setting |
+| Enter | on Audio: start / finish adjusting (Left/Right change the value) |
+| Esc | back to Dash (or finish adjusting) |
 | close the window, or Ctrl+C in the terminal | quit |
 
 Other data sources: `software/run-ui-on-pc.sh --replay FILE` (lines like
@@ -62,6 +66,10 @@ buttons arrive from hbas-iocd as the `hbas-buttons` input device;
   (CROSS_CHECKS sec. 12), and the tests run against a simulated IOC. On the
   unit: `hbas-iocd` → `vcan0` → `hogtied-ui --can vcan0`. Unknown until
   hardware: the REQ/ACK edge polarity (both edges are used).
+- **Audio: settings only, nothing reaches the DSP yet.** The Audio page uses
+  the stock ranges and step-to-dB tables, and the EQ profile follows the
+  engine; changes are logged. Which DSP writes they become is what the bench
+  capture is for (`docs/findings/AUDIO.md`). `--speakers 2` hides fade.
 - **Shown raw on purpose:** gear numbers, and tire pressure/temperature. The
   stock code doesn't define their meanings or units, so the UI doesn't
   guess.

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 /*
- * HogTiedOS main UI: 400x240, three pages switched with LEFT/RIGHT.
+ * HogTiedOS main UI: 400x240, pages switched with LEFT/RIGHT.
  *   Dash   - speed, gear, rpm, warnings, clock, ambient temperature
+ *   Audio  - volume, tone, fade, output, automatic EQ (ui_audio.c)
  *   Tires  - TPMS values
  *   System - build and data status
  * Values the stock software doesn't convert (gear meaning, tire units) are
@@ -11,16 +12,6 @@
 
 #include <stdio.h>
 
-#include "lvgl.h"
-
-#define COL_BG      lv_color_hex(0x0B0B0D)
-#define COL_PANEL   lv_color_hex(0x1A1B1F)
-#define COL_TEXT    lv_color_hex(0xECECEC)
-#define COL_DIM     lv_color_hex(0x7C7F87)
-#define COL_ACCENT  lv_color_hex(0xFF7A1A)
-#define COL_WARN    lv_color_hex(0xFFC21A)
-#define COL_ALARM   lv_color_hex(0xFF3B30)
-#define COL_OK      lv_color_hex(0x34C759)
 
 #define RPM_MAX 6000      /* display scale only */
 
@@ -39,7 +30,7 @@ static bool tires_trike;
 /* System */
 static lv_obj_t *lbl_sys;
 
-static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, lv_color_t col, const char *txt)
+lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t col, const char *txt)
 {
 	lv_obj_t *l = lv_label_create(parent);
 
@@ -49,7 +40,7 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *font, lv_color_t col, 
 	return l;
 }
 
-static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h)
+lv_obj_t *ui_panel(lv_obj_t *parent, int x, int y, int w, int h)
 {
 	lv_obj_t *p = lv_obj_create(parent);
 
@@ -65,7 +56,7 @@ static lv_obj_t *panel(lv_obj_t *parent, int x, int y, int w, int h)
 
 static lv_obj_t *indicator(lv_obj_t *parent, const char *txt)
 {
-	lv_obj_t *l = label(parent, &lv_font_montserrat_14, COL_DIM, txt);
+	lv_obj_t *l = ui_label(parent, &lv_font_montserrat_14, COL_DIM, txt);
 
 	lv_obj_set_style_pad_hor(l, 6, 0);
 	lv_obj_set_style_pad_ver(l, 2, 0);
@@ -89,28 +80,28 @@ static lv_obj_t *page_create(lv_obj_t *scr, const char *title)
 	lv_obj_remove_style_all(p);
 	lv_obj_set_size(p, UI_WIDTH, UI_HEIGHT);
 	lv_obj_remove_flag(p, LV_OBJ_FLAG_SCROLLABLE);
-	t = label(p, &lv_font_montserrat_14, COL_DIM, title);
+	t = ui_label(p, &lv_font_montserrat_14, COL_DIM, title);
 	lv_obj_set_pos(t, 12, 8);
 	return p;
 }
 
 static void build_dash(lv_obj_t *p)
 {
-	lv_obj_t *speed_panel = panel(p, 10, 32, 250, 138);
-	lv_obj_t *gear_panel = panel(p, 270, 32, 120, 138);
+	lv_obj_t *speed_panel = ui_panel(p, 10, 32, 250, 138);
+	lv_obj_t *gear_panel = ui_panel(p, 270, 32, 120, 138);
 	lv_obj_t *row;
 
-	lbl_speed = label(speed_panel, &lv_font_montserrat_48, COL_TEXT, "--");
+	lbl_speed = ui_label(speed_panel, &lv_font_montserrat_48, COL_TEXT, "--");
 	lv_obj_align(lbl_speed, LV_ALIGN_CENTER, 0, -10);
 	lv_obj_set_style_transform_scale(lbl_speed, 384, 0);     /* 1.5x of 48 px */
 	lv_obj_set_style_transform_pivot_x(lbl_speed, LV_PCT(50), 0);
 	lv_obj_set_style_transform_pivot_y(lbl_speed, LV_PCT(50), 0);
-	lbl_speed_unit = label(speed_panel, &lv_font_montserrat_20, COL_DIM, "mph");
+	lbl_speed_unit = ui_label(speed_panel, &lv_font_montserrat_20, COL_DIM, "mph");
 	lv_obj_align(lbl_speed_unit, LV_ALIGN_BOTTOM_MID, 0, -8);
 
-	label(gear_panel, &lv_font_montserrat_14, COL_DIM, "GEAR");
+	ui_label(gear_panel, &lv_font_montserrat_14, COL_DIM, "GEAR");
 	lv_obj_align(lv_obj_get_child(gear_panel, 0), LV_ALIGN_TOP_MID, 0, 8);
-	lbl_gear = label(gear_panel, &lv_font_montserrat_48, COL_ACCENT, "-");
+	lbl_gear = ui_label(gear_panel, &lv_font_montserrat_48, COL_ACCENT, "-");
 	lv_obj_align(lbl_gear, LV_ALIGN_CENTER, 0, 8);
 	lv_obj_set_style_transform_scale(lbl_gear, 384, 0);
 	lv_obj_set_style_transform_pivot_x(lbl_gear, LV_PCT(50), 0);
@@ -122,7 +113,7 @@ static void build_dash(lv_obj_t *p)
 	lv_bar_set_range(bar_rpm, 0, RPM_MAX);
 	lv_obj_set_style_bg_color(bar_rpm, COL_PANEL, LV_PART_MAIN);
 	lv_obj_set_style_bg_color(bar_rpm, COL_ACCENT, LV_PART_INDICATOR);
-	lbl_rpm = label(p, &lv_font_montserrat_14, COL_DIM, "---- rpm");
+	lbl_rpm = ui_label(p, &lv_font_montserrat_14, COL_DIM, "---- rpm");
 	lv_obj_set_pos(lbl_rpm, 310, 176);
 
 	row = lv_obj_create(p);
@@ -136,10 +127,10 @@ static void build_dash(lv_obj_t *p)
 	ind_oil = indicator(row, "OIL");
 	ind_fuel = indicator(row, "FUEL");
 	ind_temp = indicator(row, "HOT");
-	lbl_ign = label(row, &lv_font_montserrat_14, COL_DIM, "KEY --");
-	lbl_ambient = label(row, &lv_font_montserrat_14, COL_TEXT, "--.- C");
+	lbl_ign = ui_label(row, &lv_font_montserrat_14, COL_DIM, "KEY --");
+	lbl_ambient = ui_label(row, &lv_font_montserrat_14, COL_TEXT, "--.- C");
 
-	lbl_clock = label(p, &lv_font_montserrat_20, COL_TEXT, "--:--");
+	lbl_clock = ui_label(p, &lv_font_montserrat_20, COL_TEXT, "--:--");
 	lv_obj_align(lbl_clock, LV_ALIGN_TOP_RIGHT, -12, 4);
 }
 
@@ -173,19 +164,19 @@ static void build_tires(lv_obj_t *p)
 	static const char *const names[HBAS_TIRE_COUNT] = { "FRONT", "REAR", "LEFT REAR" };
 
 	for (int i = 0; i < HBAS_TIRE_COUNT; i++) {
-		lv_obj_t *pn = panel(p, 10 + i * 128, 40, 120, 120);
-		lv_obj_t *t = label(pn, &lv_font_montserrat_14, COL_DIM, names[i]);
+		lv_obj_t *pn = ui_panel(p, 10 + i * 128, 40, 120, 120);
+		lv_obj_t *t = ui_label(pn, &lv_font_montserrat_14, COL_DIM, names[i]);
 
 		tire_panel[i] = pn;
 		lbl_tire_name[i] = t;
 		lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 8);
-		lbl_tire[i] = label(pn, &lv_font_montserrat_20, COL_TEXT, "--");
+		lbl_tire[i] = ui_label(pn, &lv_font_montserrat_20, COL_TEXT, "--");
 		lv_obj_set_style_text_align(lbl_tire[i], LV_TEXT_ALIGN_CENTER, 0);
 		lv_obj_align(lbl_tire[i], LV_ALIGN_CENTER, 0, 10);
 	}
-	lbl_tpms_state = label(p, &lv_font_montserrat_14, COL_DIM, "");
+	lbl_tpms_state = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
 	lv_obj_set_pos(lbl_tpms_state, 12, 172);
-	lv_obj_t *note = label(p, &lv_font_montserrat_14, COL_DIM,
+	lv_obj_t *note = ui_label(p, &lv_font_montserrat_14, COL_DIM,
 			       "Raw bike values (P / T): units not yet confirmed");
 	lv_obj_set_pos(note, 12, 196);
 	tires_layout(false);            /* motorcycle until the bike says trike */
@@ -193,7 +184,7 @@ static void build_tires(lv_obj_t *p)
 
 static void build_system(lv_obj_t *p)
 {
-	lbl_sys = label(p, &lv_font_montserrat_14, COL_TEXT, "");
+	lbl_sys = ui_label(p, &lv_font_montserrat_14, COL_TEXT, "");
 	lv_obj_set_pos(lbl_sys, 12, 36);
 }
 
@@ -218,9 +209,11 @@ void ui_create(void)
 	lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
 	pages[UI_PAGE_DASH] = page_create(scr, "HOGTIED");
+	pages[UI_PAGE_AUDIO] = page_create(scr, "AUDIO");
 	pages[UI_PAGE_TIRES] = page_create(scr, "TIRES");
 	pages[UI_PAGE_SYSTEM] = page_create(scr, "SYSTEM");
 	build_dash(pages[UI_PAGE_DASH]);
+	ui_audio_build(pages[UI_PAGE_AUDIO]);
 	build_tires(pages[UI_PAGE_TIRES]);
 	build_system(pages[UI_PAGE_SYSTEM]);
 
@@ -230,7 +223,7 @@ void ui_create(void)
 		lv_obj_set_size(dots[i], 6, 6);
 		lv_obj_set_style_radius(dots[i], LV_RADIUS_CIRCLE, 0);
 		lv_obj_set_style_bg_opa(dots[i], LV_OPA_COVER, 0);
-		lv_obj_align(dots[i], LV_ALIGN_TOP_MID, (i - 1) * 12, 12);
+		lv_obj_align(dots[i], LV_ALIGN_TOP_MID, i * 12 - (UI_PAGE_COUNT - 1) * 6, 12);
 	}
 	show_page(UI_PAGE_DASH);
 }
@@ -285,6 +278,7 @@ void ui_update(const struct hbas_vehicle *v)
 		lv_label_set_text_fmt(lbl_ambient, "%d.%d C", amb / 10, (amb < 0 ? -amb : amb) % 10);
 	lv_label_set_text_fmt(lbl_ign, "KEY %s", hbas_ignition_name(v->ignition));
 
+	ui_audio_update(v);
 	indicator_set(ind_engine, v->engine_running, COL_OK);
 	indicator_set(ind_oil, v->oil_pressure_warning, COL_ALARM);
 	indicator_set(ind_fuel, v->low_fuel, COL_WARN);
@@ -311,6 +305,8 @@ void ui_update(const struct hbas_vehicle *v)
 
 void ui_key(enum ui_key key)
 {
+	if (page == UI_PAGE_AUDIO && ui_audio_key(key))
+		return;
 	if (key == UI_KEY_RIGHT)
 		show_page((page + 1) % UI_PAGE_COUNT);
 	else if (key == UI_KEY_LEFT)
