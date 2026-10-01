@@ -229,7 +229,11 @@ In HogTiedOS the **Harley** EQ preset uses that table for the detected bike
 and follows the volume step, engine on/off and speakers vs headset, like the
 stock radio. **Flat** stays the default. Configurations with no factory
 profile (e.g. 136-139, which ship only a `.conf`) give flat, as stock falls
-back to flat. Not reproduced: the speed-dependent boost (slot 6).
+back to flat. **Left out on purpose: the speed-dependent bass boost**
+(slot 6, control 16). The user EQ owns all 7 tone slots and the Harley
+preset is generated at speed 0, so nothing changes the bass with speed;
+HogTiedOS's one speed-dependent adjustment is **Speed volume** (sec. 7.6),
+which raises the whole level instead.
 
 ### 7.6 Speed volume (stock "AVC")
 

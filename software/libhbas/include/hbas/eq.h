@@ -10,7 +10,8 @@
  * Sample rate 48 kHz: confirmed from the factory tone filters (AUDIO.md
  * sec. 7.2). In stock these 7 slots hold bass, treble, Harley's fixed
  * voicing filters and a speed-dependent bass boost (sec. 7.3); writing the
- * user EQ there replaces all of them.
+ * user EQ there replaces all of them. The speed bass boost is dropped on
+ * purpose: Speed volume (hbas/audio.h) is the only speed adjustment.
  */
 #ifndef HBAS_EQ_H
 #define HBAS_EQ_H
