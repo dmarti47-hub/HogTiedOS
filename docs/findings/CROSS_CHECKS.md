@@ -291,3 +291,60 @@ Decoded messages (data bytes 0-based; all multi-byte fields big-endian):
 
 The Lua cites "MY13 HDLAN Normal Mode Message Specification" and
 "Harley-Davidson_rev_4_5.xls" as its sources; we don't have those.
+
+## 12. IOC link (dev-ipc) protocol, verified in the binary and Lua
+
+Sources: stock `boot/bin/dev-ipc` (boot IFS; disassembled, PLT names
+resolved from its relocations) and the plain-text Lua services `onOff.lua`
+(ch2), `faceplate.lua` (ch3), `vehicleCAN.lua` (ch4), `ecu-reset.lua` (ch7),
+`testIpc.lua`. Addresses below are dev-ipc virtual addresses.
+
+**SPI framing (confirms the DSP handoff's bring-up report):**
+- Send (0x103610): 2-byte header `A2 N`, then N payload bytes.
+- Receive (0x1036E4): send `A1 00`, read 2 bytes that must be `A1 N`; N = 0
+  means no message, else read N payload bytes.
+- After every SPI transfer (each header, each data block) the driver waits
+  for an **IPC_ACK interrupt**, timeout `-A` ms (50 in stock, x1e6 ns at
+  0x103370; "Timeout waiting for IPC_ACK"). Before a header it first drains
+  stale ACK events (0x103560).
+- Payload byte 0 = channel in bits 5:0 (0x104538 `ands r3, r0, #0x3f`); the
+  rest is the channel message. Upper 2 bits: meaning not traced.
+
+**Handshake lines:** `-I%i,%i` (format at 0x110050) is parsed as
+`&REQ, &ACK` (0x106F44), so stock `-I136,137` = **REQ 136, ACK 137**.
+They're QNX interrupt numbers; reading them as GPIO136/GPIO137 rests on the
+IPL muxing exactly those pads as GPIO inputs (sec. 10). The other plausible
+numbering (GPIO = vector - 96) would give GPIO40/41, which the IPL muxes as
+GPMC address lines. **Edge polarity not traced** (set by QNX startup, not
+dev-ipc).
+
+**Defaults compiled in** (0x106F88): name "ipc", SPI module 3, CS 0, mode
+0x608, 125 kHz, ACK timeout 50 ms, REQ 235, ACK 143. The stock command line
+overrides clock (1 MHz), channels (8), REQ/ACK.
+
+**Channel 0 = flow control** (builder 0x102A60, parser 0x102BC4): payload
+`[0x00, 0x10, count, entry...]`, one entry byte per channel: bit 7 = XON,
+bits 6:0 = that channel's receive-queue fill. 0x10 matches "IPC protocol
+v1.0". **Channels with no open client are sent as XOFF**, so a host has to
+announce XON for every channel it wants traffic on. In received flow
+messages, bit 7 = 1 means XON for that channel; channel 0's own entry turns
+the link on or off. Channel 1 is also handled inside the driver (watchdog;
+stock runs without `-w`, so it's disabled).
+
+**Application messages** (bytes after the channel byte):
+- **ch2 power (onOff.lua) - no ID header.** IOC → host: byte 0 = msg ID
+  (0 shutdown request, 1 normal operation, 2 SW version, 3 diag identifier,
+  4 emergency shutdown, 102 shutdown log). Normal operation: [1] IOC state
+  (0 bootloader, 1 application, 2 FC update), [2..3] battery ADC
+  **low, high** (V = raw x 27.5 / 1023), [4] bit0 silent-boot/appear-off
+  request, bits 4-7 amps 1-4 present. Host → IOC, 4 bytes:
+  `[msgid, request, forceOn, expected_amps]` with msgid 0 READY_FOR_SHUTDOWN /
+  1 KEEP_RUNNING, request 0 normal / 1 reset to bootloader / 2 reset to
+  application. Stock answers **every** normal-operation message with
+  `01 00 forceOn amps`. If the IOC reports bootloader state outside a
+  software update, stock sends `01 02 00 amps` (reset IOC to application).
+  On a shutdown request it cleans up, then sends `00 00 forceOn amps`
+  (30 s failsafe timer).
+- **ch3/ch4:** `[ID low, ID high, length, data...]` (testIpc.lua). ch4 IDs
+  are CAN IDs (sec. 11).
+- **ch7:** KWP2000 `11 01` ECU reset (bootloader mode only).
