@@ -78,6 +78,9 @@ void ui_map_tick(void);                      /* swap in finished frames */
 bool ui_map_has_frame(void);
 void ui_map_gps(const struct hbas_gps_view *v);
 bool ui_map_key(enum ui_key key);
+void ui_map_places(const char *path);         /* saved places file; NULL: none */
+void ui_map_add_place(const char *name, double lat, double lon);   /* not saved */
+bool ui_map_idle(void);                       /* no route or frame in progress */
 
 /* GPS page: hbas-gpsd's view of the u-blox receiver (gpsproto.h). */
 void ui_gps_build(lv_obj_t *page);

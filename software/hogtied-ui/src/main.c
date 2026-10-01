@@ -28,6 +28,7 @@
  *
  * Map page: --map-dir DIR (a map from tools/maps/build_map.sh),
  * --map-style FILE (software/maps/hogtied.oss), --map-font FILE (TTF).
+ * Saved places: --places FILE; default places.conf next to the settings.
  * Only in builds with HOGTIED_MAP.
  *
  * Settings (volume, output, EQ, ...) are remembered:
@@ -339,6 +340,8 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		{ 11000, "", "02-accelerating" },
 		{ 22000, "", "03-cruise-low-fuel" },
 		{ 22020, "R", "03a-map" },
+		{ 22025, "E", "03a1-map-menu" },                  /* test places */
+		{ 22030, "DE", "03a2-map-route" },                 /* Go to Devil's Lake */
 		{ 22050, "R", "03b-media" },                       /* demo phone playing */
 		{ 22100, "R", "04-audio" },
 		{ 22200, "DERRR", "05-audio-fade-adjust" },        /* fade 3 steps front */
@@ -370,6 +373,9 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 	ui_set_audio_backend(&log_backend);
 	ui_set_bike(2);                         /* demo bike: OE FLTR, as the IOC would report */
 	ui_map_open(map_dir, map_style, map_font);
+	ui_map_places(NULL);
+	ui_map_add_place("H-D Museum", 43.0317, -87.9165);
+	ui_map_add_place("Devil's Lake", 43.4147, -89.7300);
 	/* demo phone, as hbas-btd would report it */
 	bt_state.daemon = true;
 	bt_feed_line("bt powered=1 pairable=0 agent=1 connected=1 name=\"Rider's Phone\" player=1");
@@ -387,13 +393,15 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		if (!strcmp(script[i].name, "14-audio-2-speakers"))
 			ui_set_speaker_count(2);
 		run_to(script[i].t);
-		if (!strcmp(script[i].name, "03a-map"))
-			/* the map draws on its own thread: give it time (real time) */
-			for (int ms = 0; ms < 5000 && !ui_map_has_frame(); ms += 10) {
+		press_keys(script[i].keys);
+		if (!strncmp(script[i].name, "03a", 3))
+			/* the map draws (and routes) on its own thread: give it
+			 * time (real time) */
+			for (int ms = 0; ms < 8000 && !(ui_map_has_frame() && ui_map_idle());
+			     ms += 10) {
 				ui_map_tick();
 				usleep(10000);
 			}
-		press_keys(script[i].keys);
 		ui_update(&vehicle);
 		lv_obj_invalidate(lv_screen_active());
 		lv_refr_now(d);
@@ -601,7 +609,7 @@ static lv_display_t *create_display(const char *fbdev)
 
 struct live_opts {
 	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file, *bt_socket;
-	const char *gps_socket, *map_dir, *map_style, *map_font;
+	const char *gps_socket, *map_dir, *map_style, *map_font, *places;
 	bool demo, stdin_keys;
 	int speakers, bike;
 };
@@ -654,6 +662,7 @@ static int run_live(const struct live_opts *o)
 		ui_set_bike(bike = o->bike);
 	if (o->settings)
 		persist_init(o->settings, o->settings_mount);
+	ui_map_places(o->places);
 	/* only now connect the audio output, so the first thing it gets is the
 	 * saved settings (no jump from the defaults at power-on) */
 	ui_set_audio_backend(&log_backend);
@@ -723,7 +732,7 @@ int main(int argc, char **argv)
 				.gps_socket = "/run/hbas/gps.sock" };
 	static char default_bt[256], default_gps[256];
 	const char *snap = NULL;
-	static char default_settings[512];
+	static char default_settings[512], default_places[512];
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--demo"))
@@ -758,12 +767,15 @@ int main(int argc, char **argv)
 			o.settings = argv[++i];
 		else if (!strcmp(argv[i], "--settings-mount") && i + 1 < argc)
 			o.settings_mount = argv[++i];
+		else if (!strcmp(argv[i], "--places") && i + 1 < argc)
+			o.places = argv[++i];
 		else {
 			fprintf(stderr, "usage: %s [--demo] [--replay FILE] [--can IFACE] "
 				"[--fb DEV] [--stdin-keys] [--speakers 2|4] [--bike N | --bike-file F]\n"
 				"       [--bt-socket PATH] [--gps-socket PATH]\n"
 				"       [--map-dir DIR --map-style OSS --map-font TTF]\n"
-				"       [--settings FILE [--settings-mount DIR]] | --snapshot PREFIX\n",
+				"       [--settings FILE [--settings-mount DIR]] [--places FILE]\n"
+				"       | --snapshot PREFIX\n",
 				argv[0]);
 			return 2;
 		}
@@ -795,6 +807,14 @@ int main(int argc, char **argv)
 	(void)default_bt;
 	(void)default_gps;
 #endif
+	/* places live next to the settings (same filesystem, same remounting) */
+	if (!o.places && o.settings) {
+		const char *slash = strrchr(o.settings, '/');
+
+		snprintf(default_places, sizeof(default_places), "%.*splaces.conf",
+			 slash ? (int)(slash - o.settings + 1) : 0, o.settings);
+		o.places = default_places;
+	}
 	hbas_vehicle_init(&vehicle);
 	use_virtual_clock = snap != NULL;
 #if defined(HOGTIED_SDL)

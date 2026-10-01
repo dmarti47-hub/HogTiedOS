@@ -99,6 +99,13 @@ fi
 "$GPSD" --replay "$ROOT/software/gpsd/demo/ride.nmea" --socket "$RUN/hbas-gps.sock" &
 pids="$pids $!"
 trap 'kill $pids 2>/dev/null' EXIT INT TERM
+# two test destinations for the Map page's menu, the first time only
+PLACES="${XDG_CONFIG_HOME:-$HOME/.config}/hogtied/places.conf"
+if [ -n "$MAP_ARGS" ] && [ ! -f "$PLACES" ]; then
+    mkdir -p "$(dirname "$PLACES")"
+    printf '# HogTiedOS places 1\nroute=fastest\nplace=43.031700,-87.916500,H-D Museum\nplace=43.414700,-89.730000,Devil'"'"'s Lake\n' > "$PLACES"
+    echo "Map page: added test places to $PLACES"
+fi
 echo "Starting hogtied-ui $*  (Left/Right: pages, Esc: back, close window to quit)"
 # shellcheck disable=SC2086 # MAP_ARGS is a list of options
 "$BUILD/hogtied-ui" --bt-socket "$RUN/hbas-bt.sock" --gps-socket "$RUN/hbas-gps.sock" $MAP_ARGS "$@"

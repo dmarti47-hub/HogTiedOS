@@ -18,4 +18,11 @@ void persist_init(const char *path, const char *mount);
 void persist_poll(uint32_t now_ms);
 void persist_flush(void);
 
+/*
+ * Write another file (e.g. the saved places) the same way: atomically, on
+ * the same filesystem, remounting it read-write only for the write.
+ * Returns 0, or -1 with errno set.
+ */
+int persist_write_file(const char *path, const char *text);
+
 #endif

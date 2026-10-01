@@ -6,16 +6,28 @@
 
 #include <cmath>
 #include <cstdio>
+#include <chrono>
 #include <list>
+#include <map>
+#include <optional>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <osmscout/db/Database.h>
 #include <osmscout/projection/MercatorProjection.h>
+#include <osmscout/routing/RoutePostprocessor.h>
+#include <osmscout/routing/RoutingProfile.h>
+#include <osmscout/routing/SimpleRoutingService.h>
 #include <osmscoutmap/MapService.h>
 #include <osmscoutmap/StyleConfig.h>
 #include <osmscoutmapagg/MapPainterAgg.h>
+
+#include <agg_conv_stroke.h>
+#include <agg_path_storage.h>
+#include <agg_rasterizer_scanline_aa.h>
+#include <agg_renderer_scanline.h>
+#include <agg_scanline_u.h>
 
 struct hbas_map {
 	osmscout::DatabaseRef database;
@@ -25,6 +37,8 @@ struct hbas_map {
 	osmscout::AreaSearchParameter search;
 	osmscout::MercatorProjection projection;
 	std::vector<unsigned char> rgb;          // AGG draws 24-bit RGB
+	osmscout::SimpleRoutingServiceRef router;  // opened on the first route
+	std::vector<osmscout::GeoCoord> route;     // drawn in orange
 	double dpi = 96;
 	bool rendered = false;
 };
@@ -70,6 +84,46 @@ extern "C" void hbas_map_close(struct hbas_map *m)
 	delete m;
 }
 
+// The route over the map: a dark casing, then the orange line (COL_ACCENT).
+static void draw_route(hbas_map *m, agg::pixfmt_rgb24 &pf)
+{
+	if (m->route.size() < 2)
+		return;
+	agg::path_storage path;
+	bool first = true;
+
+	for (const auto &c : m->route) {
+		osmscout::Vertex2D v;
+
+		if (!m->projection.GeoToPixel(c, v))
+			continue;
+		if (first)
+			path.move_to(v.GetX(), v.GetY());
+		else
+			path.line_to(v.GetX(), v.GetY());
+		first = false;
+	}
+	agg::renderer_base<agg::pixfmt_rgb24> base(pf);
+	agg::renderer_scanline_aa_solid<agg::renderer_base<agg::pixfmt_rgb24>> ren(base);
+	agg::rasterizer_scanline_aa<> ras;
+	agg::scanline_u8 sl;
+	agg::conv_stroke<agg::path_storage> stroke(path);
+
+	stroke.line_join(agg::round_join);
+	stroke.line_cap(agg::round_cap);
+	const struct { double w; agg::rgba8 c; } layers[] = {
+		{ 9.0, agg::rgba8(0x10, 0x10, 0x12) },
+		{ 5.5, agg::rgba8(0xFF, 0x7A, 0x1A) },
+	};
+	for (const auto &l : layers) {
+		stroke.width(l.w);
+		ras.reset();
+		ras.add_path(stroke);
+		ren.color(l.c);
+		agg::render_scanlines(ras, sl, ren);
+	}
+}
+
 extern "C" int hbas_map_render(struct hbas_map *m, double lat, double lon, double level,
 			       double rotation_deg, uint16_t *out, int w, int h)
 {
@@ -111,6 +165,7 @@ extern "C" int hbas_map_render(struct hbas_map *m, double lat, double lon, doubl
 
 		if (!painter.DrawMap(m->projection, m->parameter, all, &pf))
 			return -1;
+		draw_route(m, pf);
 		for (size_t i = 0, n = (size_t)w * h; i < n; i++) {
 			const unsigned char *p = &m->rgb[i * 3];
 
@@ -135,4 +190,177 @@ extern "C" bool hbas_map_to_pixel(const struct hbas_map *m, double lat, double l
 	*x = v.GetX();
 	*y = v.GetY();
 	return true;
+}
+
+extern "C" const char *hbas_route_mode_name(enum hbas_route_mode mode)
+{
+	switch (mode) {
+	case HBAS_ROUTE_FASTEST: return "Fastest";
+	case HBAS_ROUTE_SHORTEST: return "Shortest";
+	case HBAS_ROUTE_NO_HIGHWAYS: return "No highways";
+	case HBAS_ROUTE_BACKROADS: return "Back roads";
+	default: return "?";
+	}
+}
+
+// Typical speeds (km/h) by road type, for the fastest route and for time
+// estimates; libosmscout's Routing demo uses the same table.
+static std::map<std::string, double> car_speeds()
+{
+	return {
+		{ "highway_motorway", 110 }, { "highway_motorway_trunk", 100 },
+		{ "highway_motorway_primary", 70 }, { "highway_motorway_link", 60 },
+		{ "highway_motorway_junction", 60 }, { "highway_trunk", 100 },
+		{ "highway_trunk_link", 60 }, { "highway_primary", 70 },
+		{ "highway_primary_link", 60 }, { "highway_secondary", 60 },
+		{ "highway_secondary_link", 50 }, { "highway_tertiary", 55 },
+		{ "highway_tertiary_link", 55 }, { "highway_unclassified", 50 },
+		{ "highway_road", 50 }, { "highway_residential", 20 },
+		{ "highway_roundabout", 40 }, { "highway_living_street", 10 },
+		{ "highway_service", 30 }, { "highway_mini_roundabout", 30 },
+	};
+}
+
+static bool is_motorway(const std::string &t)
+{
+	return t.rfind("highway_motorway", 0) == 0;
+}
+
+// The speed table for a mode. Types a car can use that aren't listed
+// (ferries and the like) get a slow default, so they're used only when
+// needed; types left out entirely can't be routed over.
+static std::map<std::string, double> mode_speeds(const osmscout::TypeConfig &tc,
+						 enum hbas_route_mode mode)
+{
+	std::map<std::string, double> base = car_speeds(), out;
+
+	for (const auto &type : tc.GetTypes()) {
+		if (type->GetIgnore() || !type->CanRouteCar())
+			continue;
+		const std::string &n = type->GetName();
+		auto it = base.find(n);
+		double v = it != base.end() ? it->second : 20;
+
+		if (mode == HBAS_ROUTE_NO_HIGHWAYS && is_motorway(n))
+			continue;
+		if (mode == HBAS_ROUTE_BACKROADS) {
+			// big roads made "slow" so the router prefers the
+			// country roads between them, but can still use them
+			if (is_motorway(n))
+				v = 35;
+			else if (n.rfind("highway_trunk", 0) == 0)
+				v = 40;
+			else if (n == "highway_primary")
+				v = 50;
+			else if (n == "highway_secondary" || n == "highway_tertiary")
+				v = 70;
+			else if (n == "highway_unclassified")
+				v = 60;
+		}
+		out[n] = v;
+	}
+	return out;
+}
+
+extern "C" void hbas_map_clear_route(struct hbas_map *m)
+{
+	if (m)
+		m->route.clear();
+}
+
+extern "C" int hbas_map_route(struct hbas_map *m, double from_lat, double from_lon,
+			      double heading_deg, double to_lat, double to_lon,
+			      enum hbas_route_mode mode, struct hbas_route_info *info, char *err,
+			      size_t errlen)
+{
+	auto fail = [&](const char *why) {
+		if (err && errlen)
+			std::snprintf(err, errlen, "%s", why);
+		return -1;
+	};
+
+	if (!m || mode < 0 || mode >= HBAS_ROUTE_MODES)
+		return fail("bad request");
+	try {
+		const osmscout::TypeConfig &tc = *m->database->GetTypeConfig();
+
+		if (!m->router) {
+			osmscout::RouterParameter rp;
+			auto r = std::make_shared<osmscout::SimpleRoutingService>(
+				m->database, rp, osmscout::RoutingService::DEFAULT_FILENAME_BASE);
+
+			if (!r->Open())
+				return fail("this map has no routing data");
+			m->router = r;
+		}
+
+		// time estimates always use the real road speeds
+		auto timing = std::make_shared<osmscout::FastestPathRoutingProfile>(
+			m->database->GetTypeConfig());
+		timing->ParametrizeForCar(tc, mode_speeds(tc, HBAS_ROUTE_FASTEST), 160.0);
+
+		std::shared_ptr<osmscout::AbstractRoutingProfile> profile;
+		if (mode == HBAS_ROUTE_SHORTEST)
+			profile = std::make_shared<osmscout::ShortestPathRoutingProfile>(
+				m->database->GetTypeConfig());
+		else
+			profile = std::make_shared<osmscout::FastestPathRoutingProfile>(
+				m->database->GetTypeConfig());
+		// set up by hand, not ParametrizeForCar: that complains about the
+		// road types "No highways" leaves out on purpose
+		profile->SetVehicle(osmscout::vehicleCar);
+		profile->SetVehicleMaxSpeed(160.0);
+		for (const auto &[name, kmh] : mode_speeds(tc, mode))
+			profile->AddType(tc.GetTypeInfo(name), kmh);
+
+		auto start = m->router->GetClosestRoutableNode(
+			osmscout::GeoCoord(from_lat, from_lon), *profile, osmscout::Kilometers(1));
+		if (!start.IsValid())
+			return fail("no road near you");
+		auto target = m->router->GetClosestRoutableNode(
+			osmscout::GeoCoord(to_lat, to_lon), *profile, osmscout::Kilometers(1));
+		if (!target.IsValid())
+			return fail("no road near the destination");
+
+		std::optional<osmscout::Bearing> bearing;
+		if (heading_deg >= 0)
+			bearing = osmscout::Bearing::Degrees(heading_deg);
+		osmscout::RoutingParameter param;
+		auto result = m->router->CalculateRoute(*profile, start.GetRoutePosition(),
+							target.GetRoutePosition(), bearing, param);
+		if (!result.Success())
+			return fail("no route found");
+
+		auto points = m->router->TransformRouteDataToPoints(result.GetRoute());
+		auto desc = m->router->TransformRouteDataToRouteDescription(result.GetRoute());
+		if (!points.Success() || !desc.Success())
+			return fail("route could not be read");
+
+		osmscout::RoutePostprocessor post;
+		std::list<osmscout::RoutePostprocessor::PostprocessorRef> steps{
+			std::make_shared<osmscout::RoutePostprocessor::DistanceAndTimePostprocessor>(),
+		};
+		std::vector<osmscout::RoutingProfileRef> profiles{ timing };
+		std::vector<osmscout::DatabaseRef> dbs{ m->database };
+		if (!post.PostprocessRouteDescription(*desc.GetDescription(), profiles, dbs, steps))
+			return fail("route could not be measured");
+
+		std::vector<osmscout::GeoCoord> line;
+		for (const auto &p : points.GetPoints()->points)
+			line.push_back(p.GetCoord());
+		if (line.size() < 2)
+			return fail("you are already there");
+		m->route = std::move(line);
+
+		if (info) {
+			const auto &last = desc.GetDescription()->Nodes().back();
+
+			info->distance_m = last.GetDistance().AsMeter();
+			info->duration_s = std::chrono::duration<double>(last.GetTime()).count();
+			info->points = m->route.size();
+		}
+		return 0;
+	} catch (const std::exception &e) {
+		return fail(e.what());
+	}
 }

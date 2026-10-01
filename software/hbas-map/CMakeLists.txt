@@ -19,3 +19,8 @@ target_compile_options(hbasmap PRIVATE -Wall -Wextra)
 add_executable(map-render-test tools/map-render-test.c)
 set_target_properties(map-render-test PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(map-render-test PRIVATE hbasmap)
+
+# map-route-test: route between two points in every mode, and time it
+add_executable(map-route-test tools/map-route-test.c)
+set_target_properties(map-route-test PROPERTIES LINKER_LANGUAGE CXX)
+target_link_libraries(map-route-test PRIVATE hbasmap m)

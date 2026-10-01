@@ -26,12 +26,12 @@ static int remount(bool rw)
 	return mount(NULL, mnt, NULL, MS_REMOUNT | MS_NOATIME | (rw ? 0 : MS_RDONLY), NULL);
 }
 
-/* mkdir -p for the directory part of path */
-static int make_parent_dirs(void)
+/* mkdir -p for the directory part of file */
+static int make_parent_dirs(const char *file)
 {
 	char dir[512];
 
-	if (snprintf(dir, sizeof(dir), "%s", path) >= (int)sizeof(dir))
+	if (snprintf(dir, sizeof(dir), "%s", file) >= (int)sizeof(dir))
 		return -1;
 	for (char *p = dir + 1; *p; p++) {
 		if (*p != '/')
@@ -40,6 +40,29 @@ static int make_parent_dirs(void)
 		if (mkdir(dir, 0755) && errno != EEXIST)
 			return -1;
 		*p = '/';
+	}
+	return 0;
+}
+
+int persist_write_file(const char *file, const char *text)
+{
+	int ok, err;
+
+	if (remount(true)) {
+		err = errno;
+		fprintf(stderr, "persist: %s not saved, %s not writable: %s\n", file, mnt,
+			strerror(err));
+		errno = err;
+		return -1;
+	}
+	ok = !make_parent_dirs(file) && !hbas_settings_save(file, text);
+	err = errno;
+	if (remount(false))
+		fprintf(stderr, "persist: WARNING %s left read-write: %s\n", mnt, strerror(errno));
+	if (!ok) {
+		fprintf(stderr, "persist: saving %s failed: %s\n", file, strerror(err));
+		errno = err;
+		return -1;
 	}
 	return 0;
 }
@@ -57,23 +80,12 @@ static void current_text(char *buf, size_t len)
 static void save(void)
 {
 	char text[HBAS_SETTINGS_MAX];
-	int ok, err;
 
 	current_text(text, sizeof(text));
 	if (!text[0] || !strcmp(text, saved_text))
 		return;                             /* e.g. changed and changed back */
-	if (remount(true)) {
-		fprintf(stderr, "settings: not saved, %s not writable: %s\n", mnt, strerror(errno));
+	if (persist_write_file(path, text))
 		return;
-	}
-	ok = !make_parent_dirs() && !hbas_settings_save(path, text);
-	err = errno;
-	if (remount(false))
-		fprintf(stderr, "settings: WARNING %s left read-write: %s\n", mnt, strerror(errno));
-	if (!ok) {
-		fprintf(stderr, "settings: saving %s failed: %s\n", path, strerror(err));
-		return;
-	}
 	snprintf(saved_text, sizeof(saved_text), "%s", text);
 	fprintf(stderr, "settings: saved %s\n", path);
 }

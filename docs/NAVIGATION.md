@@ -60,12 +60,51 @@ labels); the route will be drawn in orange by the UI on top.
 draw a frame at a position / zoom / rotation into RGB565, map a position to
 a pixel). The UI's Map page (right after the dash) draws on a worker thread
 into the buffer that isn't on screen and swaps it in, so the UI never
-waits; an orange arrow marks the bike; Up/Down zoom (9-17), OK toggles
-heading-up / north-up; "(c) OpenStreetMap" credit. One frame takes
+waits; an orange arrow marks the bike; Up/Down zoom (9-17), OK opens the
+navigation menu (below); "(c) OpenStreetMap" credit. One frame takes
 ~15-80 ms on the PC. Notes: a reused libosmscout painter drops street
 names from the next frame, so a fresh one is made per frame.
 
 ![Map page, heading-up, Milwaukee demo ride](screenshots/ui-map.png)
+
+## Routing (stage 3, first part)
+
+`hbas_map_route()` runs libosmscout's router over the same map (the
+`router*.dat` / `intersections.*` files the import already makes) and the
+route is drawn in orange over the map, under the bike arrow. Routing runs
+on the map thread, so the screen keeps moving; Milwaukee to Devil's Lake
+(~190 km) takes ~0.5 s on the PC, short trips a few ms.
+
+Route options (the menu's "Route: < >", Left/Right or OK to change; a
+route being followed is recalculated):
+
+| Option | How |
+|---|---|
+| Fastest | typical speeds per road type (libosmscout's demo table) |
+| Shortest | distance only |
+| No highways | motorways (interstates, freeways) left out of the road set |
+| Back roads | motorways / trunks / primaries made "slow", secondary and country roads "fast", so the router prefers them but can still use the big roads |
+
+Distance and time shown are always at typical speeds, whichever option
+picked the roads. Milwaukee to Devil's Lake: Fastest 189 km / 2 h 07,
+Shortest 183 km / 2 h 26, No highways 192 km / 3 h 03, Back roads
+203 km / 3 h 44.
+
+The menu (OK on the Map page): *Stop route*, *Go to* each saved place,
+*Save this spot* (saved as "Spot N" for now), the route option, and
+heading-up / north-up. Saved places and the route option live in
+`places.conf` next to the settings (`/mnt/emmc/hogtied/` on the radio,
+`~/.config/hogtied/` on a PC; format in libhbas `places.h`), written the
+same way as the settings. `run-ui-on-pc.sh` adds two test places the first
+time (H-D Museum and Devil's Lake, WI).
+
+Still to do in stage 3: an on-screen keyboard (touch and handlebar
+buttons) to name places and to enter addresses, address search with
+autofill from libosmscout's location index (`location.idx`, already in the
+map), and managing (renaming / deleting) saved places.
+
+![Map menu](screenshots/ui-map-menu.png)
+![Route to Devil's Lake](screenshots/ui-map-route.png)
 
 ## Stages
 
@@ -73,7 +112,8 @@ names from the next frame, so a fresh one is made per frame.
 2. Moving-map page: riding style (dark, bold roads, big names, little
    clutter), centred on GPS, zoom, north-up / heading-up, drawn off the UI
    thread.
-3. Routing: destination from saved places, then address search; route line.
+3. Routing: route line and options, saved places (done); on-screen
+   keyboard, address search with autofill, managing places (next).
 4. Turn-by-turn: next-turn panel, distance, rerouting. Voice once the DSP
    audio link exists.
 5. On the radio: libosmscout + AGG + FreeType in the image, maps in
