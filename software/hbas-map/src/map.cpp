@@ -12,6 +12,7 @@
 #include <list>
 #include <map>
 #include <optional>
+#include <set>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -21,6 +22,7 @@
 #include <osmscout/location/LocationService.h>
 #include <osmscout/projection/MercatorProjection.h>
 #include <osmscout/util/StringMatcher.h>
+#include <osmscout/routing/RouteDescriptionPostprocessor.h>
 #include <osmscout/routing/RoutePostprocessor.h>
 #include <osmscout/routing/RoutingProfile.h>
 #include <osmscout/routing/SimpleRoutingService.h>
@@ -48,6 +50,7 @@ struct hbas_map {
 	// bike is in: loaded on the first search
 	std::vector<std::pair<osmscout::GeoCoord, osmscout::AdminRegionRef>> towns;
 	std::vector<osmscout::GeoCoord> route;     // drawn in orange
+	std::vector<hbas_route_step> steps;        // its manoeuvres
 	double dpi = 96;
 	bool rendered = false;
 };
@@ -201,6 +204,144 @@ extern "C" bool hbas_map_to_pixel(const struct hbas_map *m, double lat, double l
 	return true;
 }
 
+
+// The route's manoeuvres, from libosmscout's description generator.
+namespace {
+using RD = osmscout::RouteDescription;
+
+hbas_turn from_move(RD::DirectionDescription::Move mv)
+{
+	switch (mv) {
+	case RD::DirectionDescription::sharpLeft: return HBAS_TURN_SHARP_LEFT;
+	case RD::DirectionDescription::left: return HBAS_TURN_LEFT;
+	case RD::DirectionDescription::slightlyLeft: return HBAS_TURN_SLIGHT_LEFT;
+	case RD::DirectionDescription::slightlyRight: return HBAS_TURN_SLIGHT_RIGHT;
+	case RD::DirectionDescription::right: return HBAS_TURN_RIGHT;
+	case RD::DirectionDescription::sharpRight: return HBAS_TURN_SHARP_RIGHT;
+	default: return HBAS_TURN_STRAIGHT;
+	}
+}
+
+bool leftish(const RD::DirectionDescriptionRef &d)
+{
+	if (!d)
+		return false;
+	auto t = d->GetCurve();
+	return t == RD::DirectionDescription::sharpLeft || t == RD::DirectionDescription::left ||
+	       t == RD::DirectionDescription::slightlyLeft;
+}
+
+// Motorways by number ("I 39/I 90"), other roads by name ("Main Street").
+std::string road_name(const RD::NameDescriptionRef &n, bool prefer_ref = false)
+{
+	if (!n)
+		return "";
+	std::string name = n->GetName(), ref = n->GetRef();
+
+	for (auto &c : ref)
+		if (c == ';')
+			c = '/';
+	if (prefer_ref)
+		return !ref.empty() ? ref : name;
+	return !name.empty() ? name : ref;
+}
+
+struct steps_cb : osmscout::RouteDescriptionPostprocessor::Callback {
+	std::vector<hbas_route_step> out;
+	double dist = 0;
+	osmscout::GeoCoord at;
+
+	void add(hbas_turn t, const std::string &name, int exit = 0)
+	{
+		hbas_route_step s{};
+
+		s.turn = t;
+		s.exit = exit;
+		s.dist_m = dist;
+		s.lat = at.GetLat();
+		s.lon = at.GetLon();
+		std::snprintf(s.name, sizeof(s.name), "%s", name.c_str());
+		// a roundabout's exit is described when leaving: merge
+		if (t == HBAS_TURN_ROUNDABOUT && !out.empty() && out.back().turn == t &&
+		    out.back().exit == 0) {
+			out.back().exit = exit;
+			std::snprintf(out.back().name, sizeof(out.back().name), "%s", name.c_str());
+			return;
+		}
+		out.push_back(s);
+	}
+	void BeforeNode(const RD::Node &node) override
+	{
+		dist = node.GetDistance().AsMeter();
+		at = node.GetLocation();
+	}
+	void OnTargetReached(const RD::TargetDescriptionRef &) override
+	{
+		add(HBAS_TURN_ARRIVE, "");
+	}
+	void OnTurn(const RD::TurnDescriptionRef &turn, const RD::CrossingWaysDescriptionRef &,
+		    const RD::DirectionDescriptionRef &, const RD::TypeNameDescriptionRef &,
+		    const RD::NameDescriptionRef &name) override
+	{
+		add(from_move(turn->GetDirection()), road_name(name));
+	}
+	void OnRoundaboutEnter(const RD::RoundaboutEnterDescriptionRef &,
+			       const RD::CrossingWaysDescriptionRef &) override
+	{
+		add(HBAS_TURN_ROUNDABOUT, "", 0);
+	}
+	void OnRoundaboutLeave(const RD::RoundaboutLeaveDescriptionRef &leave,
+			       const RD::NameDescriptionRef &name) override
+	{
+		add(HBAS_TURN_ROUNDABOUT, road_name(name), (int)leave->GetExitCount());
+	}
+	void OnMotorwayEnter(const RD::MotorwayEnterDescriptionRef &enter,
+			     const RD::CrossingWaysDescriptionRef &) override
+	{
+		add(HBAS_TURN_MOTORWAY_ENTER, road_name(enter->GetToDescription(), true));
+	}
+	void OnMotorwayChange(const RD::MotorwayChangeDescriptionRef &change,
+			      const RD::MotorwayJunctionDescriptionRef &,
+			      const RD::DirectionDescriptionRef &dir,
+			      const RD::DestinationDescriptionRef &) override
+	{
+		add(leftish(dir) ? HBAS_TURN_KEEP_LEFT : HBAS_TURN_KEEP_RIGHT,
+		    road_name(change->GetToDescription(), true));
+	}
+	void OnMotorwayLeave(const RD::MotorwayLeaveDescriptionRef &,
+			     const RD::MotorwayJunctionDescriptionRef &,
+			     const RD::DirectionDescriptionRef &dir, const RD::NameDescriptionRef &name,
+			     const RD::DestinationDescriptionRef &dest) override
+	{
+		std::string to = road_name(name);
+
+		// unnamed ramp: say where it goes, as the signs do
+		if (to.empty() && dest)
+			to = dest->GetDescription();
+		add(leftish(dir) ? HBAS_TURN_MOTORWAY_EXIT_LEFT : HBAS_TURN_MOTORWAY_EXIT_RIGHT, to);
+	}
+};
+} // namespace
+
+static std::vector<hbas_route_step> describe(RD &desc)
+{
+	osmscout::RouteDescriptionPostprocessor gen;
+	steps_cb cb;
+
+	gen.GenerateDescription(desc, cb);
+	// two manoeuvres a few metres apart (a slight bend onto a ramp, then
+	// the ramp) are one for the rider: keep the second
+	std::vector<hbas_route_step> out;
+	for (const auto &st : cb.out) {
+		if (!out.empty() && st.dist_m - out.back().dist_m < 30 &&
+		    out.back().turn != HBAS_TURN_ROUNDABOUT)
+			out.back() = st;
+		else
+			out.push_back(st);
+	}
+	return out;
+}
+
 extern "C" const char *hbas_route_mode_name(enum hbas_route_mode mode)
 {
 	switch (mode) {
@@ -285,8 +426,20 @@ extern "C" size_t hbas_map_route_points(const struct hbas_map *m, double *lat, d
 
 extern "C" void hbas_map_clear_route(struct hbas_map *m)
 {
-	if (m)
+	if (m) {
 		m->route.clear();
+		m->steps.clear();
+	}
+}
+
+extern "C" size_t hbas_map_route_steps(const struct hbas_map *m, struct hbas_route_step *out,
+				       size_t max)
+{
+	if (!m)
+		return 0;
+	for (size_t i = 0; i < m->steps.size() && i < max; i++)
+		out[i] = m->steps[i];
+	return m->steps.size();
 }
 
 extern "C" int hbas_map_route(struct hbas_map *m, double from_lat, double from_lon,
@@ -357,14 +510,31 @@ extern "C" int hbas_map_route(struct hbas_map *m, double from_lat, double from_l
 		if (!points.Success() || !desc.Success())
 			return fail("route could not be read");
 
-		osmscout::RoutePostprocessor post;
-		std::list<osmscout::RoutePostprocessor::PostprocessorRef> steps{
-			std::make_shared<osmscout::RoutePostprocessor::DistanceAndTimePostprocessor>(),
+		using RP = osmscout::RoutePostprocessor;
+		RP post;
+		std::list<RP::PostprocessorRef> steps{
+			std::make_shared<RP::DistanceAndTimePostprocessor>(),
+			std::make_shared<RP::StartPostprocessor>("Start"),
+			std::make_shared<RP::TargetPostprocessor>("Target"),
+			std::make_shared<RP::WayNamePostprocessor>(),
+			std::make_shared<RP::WayTypePostprocessor>(),
+			std::make_shared<RP::CrossingWaysPostprocessor>(),
+			std::make_shared<RP::DirectionPostprocessor>(),
+			std::make_shared<RP::MotorwayJunctionPostprocessor>(),
+			std::make_shared<RP::DestinationPostprocessor>(),
+			std::make_shared<RP::InstructionPostprocessor>(),
 		};
 		std::vector<osmscout::RoutingProfileRef> profiles{ timing };
 		std::vector<osmscout::DatabaseRef> dbs{ m->database };
-		if (!post.PostprocessRouteDescription(*desc.GetDescription(), profiles, dbs, steps))
+		const std::set<std::string, std::less<>> motorways{
+			"highway_motorway", "highway_motorway_trunk", "highway_motorway_primary",
+			"highway_trunk" },
+			links{ "highway_motorway_link", "highway_trunk_link" },
+			junctions{ "highway_motorway_junction" };
+		if (!post.PostprocessRouteDescription(*desc.GetDescription(), profiles, dbs, steps,
+						      motorways, links, junctions))
 			return fail("route could not be measured");
+		std::vector<hbas_route_step> manoeuvres = describe(*desc.GetDescription());
 
 		std::vector<osmscout::GeoCoord> line;
 		for (const auto &p : points.GetPoints()->points)
@@ -372,6 +542,7 @@ extern "C" int hbas_map_route(struct hbas_map *m, double from_lat, double from_l
 		if (line.size() < 2)
 			return fail("you are already there");
 		m->route = std::move(line);
+		m->steps = std::move(manoeuvres);
 
 		if (info) {
 			const auto &last = desc.GetDescription()->Nodes().back();

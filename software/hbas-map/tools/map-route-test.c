@@ -51,6 +51,20 @@ int main(int argc, char **argv)
 		       hbas_route_mode_name(mode), info.distance_m / 1000, info.duration_s / 60,
 		       info.points, (now() - t0) * 1e3);
 	}
+	/* the fastest route's turn-by-turn steps */
+	if (!rc) {
+		static struct hbas_route_step st[4096];
+		static const char *const names[] = {
+			"straight", "slight left", "left", "sharp left", "slight right", "right",
+			"sharp right", "roundabout", "onto motorway", "exit left", "exit right",
+			"keep left", "keep right", "arrive",
+		};
+		size_t n = hbas_map_route_steps(m, st, 4096);
+
+		for (size_t i = 0; i < n && i < 4096; i++)
+			printf("  %7.2f km  %-13s %s%s\n", st[i].dist_m / 1000, names[st[i].turn],
+			       st[i].exit ? "exit " : "", st[i].name);
+	}
 	if (argc > 8 && !rc) {
 		int w = 400, h = 240;
 		uint16_t *px = malloc((size_t)w * h * 2);

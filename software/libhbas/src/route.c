@@ -2,6 +2,7 @@
 #include "hbas/route.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #define EARTH_M 6371000.0
@@ -112,4 +113,28 @@ enum hbas_route_action hbas_route_follow(struct hbas_route_follow *f,
 	f->rerouted_once = true;
 	f->last_reroute_ms = now_ms;
 	return HBAS_ROUTE_REROUTE;
+}
+
+int hbas_nav_distance(char *buf, size_t len, double m, bool metric)
+{
+	if (m < 0)
+		m = 0;
+	if (metric) {
+		if (m < 300)
+			return snprintf(buf, len, "%d m", (int)lround(m / 10) * 10);
+		if (m < 1000)
+			return snprintf(buf, len, "%d m", (int)lround(m / 50) * 50);
+		if (m < 10000)
+			return snprintf(buf, len, "%.1f km", m / 1000);
+		return snprintf(buf, len, "%d km", (int)lround(m / 1000));
+	}
+	{
+		double ft = m / 0.3048, mi = m / 1609.344;
+
+		if (mi < 0.1)
+			return snprintf(buf, len, "%d ft", (int)lround(ft / 50) * 50);
+		if (mi < 10)
+			return snprintf(buf, len, "%.1f mi", mi);
+		return snprintf(buf, len, "%d mi", (int)lround(mi));
+	}
 }

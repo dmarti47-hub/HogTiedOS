@@ -81,6 +81,8 @@ bool ui_map_key(enum ui_key key);
 void ui_map_places(const char *path);         /* saved places file; NULL: none */
 void ui_map_add_place(const char *name, double lat, double lon);   /* not saved */
 bool ui_map_idle(void);                       /* no route or frame in progress */
+void ui_map_set_metric(bool metric);          /* follows the bike's unit setting */
+bool ui_map_next_turn(char *buf, size_t len); /* "300 m: Turn left onto ..." */
 
 /* On-screen keyboard (touch and handlebar buttons), with autofill rows. */
 #define UI_KBD_SUGGESTIONS 3

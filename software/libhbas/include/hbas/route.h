@@ -52,4 +52,11 @@ enum hbas_route_action hbas_route_follow(struct hbas_route_follow *f,
 					 double accuracy_m, uint32_t now_ms,
 					 struct hbas_route_pos *p);
 
+/*
+ * Distance for the next-turn panel, rounded like car navigation does:
+ * metric "80 m", "450 m", "1.2 km", "14 km"; otherwise "300 ft",
+ * "0.3 mi", "12 mi".
+ */
+int hbas_nav_distance(char *buf, size_t len, double m, bool metric);
+
 #endif

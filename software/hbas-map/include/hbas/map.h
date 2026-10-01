@@ -71,6 +71,33 @@ int hbas_map_route(struct hbas_map *m, double from_lat, double from_lon, double 
 		   double to_lat, double to_lon, enum hbas_route_mode mode,
 		   struct hbas_route_info *info, char *err, size_t errlen);
 void hbas_map_clear_route(struct hbas_map *m);
+/*
+ * Turn-by-turn: the manoeuvres along the current route, in order, the last
+ * one HBAS_TURN_ARRIVE. dist_m is from the start of the route.
+ */
+enum hbas_turn {
+	HBAS_TURN_STRAIGHT,
+	HBAS_TURN_SLIGHT_LEFT, HBAS_TURN_LEFT, HBAS_TURN_SHARP_LEFT,
+	HBAS_TURN_SLIGHT_RIGHT, HBAS_TURN_RIGHT, HBAS_TURN_SHARP_RIGHT,
+	HBAS_TURN_ROUNDABOUT,           /* exit: which exit */
+	HBAS_TURN_MOTORWAY_ENTER,       /* onto name */
+	HBAS_TURN_MOTORWAY_EXIT_LEFT,   /* exit ramp */
+	HBAS_TURN_MOTORWAY_EXIT_RIGHT,
+	HBAS_TURN_KEEP_LEFT,            /* motorway to motorway */
+	HBAS_TURN_KEEP_RIGHT,
+	HBAS_TURN_ARRIVE,
+};
+#define HBAS_STEP_NAME 48
+struct hbas_route_step {
+	enum hbas_turn turn;
+	int exit;
+	double dist_m;
+	double lat, lon;
+	char name[HBAS_STEP_NAME];      /* road taken ("Main Street", "I 94"); may be "" */
+};
+/* Copy the current route's steps (up to max); returns how many it has. */
+size_t hbas_map_route_steps(const struct hbas_map *m, struct hbas_route_step *out, size_t max);
+
 /* Copy the current route's points (up to max); returns how many it has. */
 size_t hbas_map_route_points(const struct hbas_map *m, double *lat, double *lon, size_t max);
 

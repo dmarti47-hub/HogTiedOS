@@ -45,6 +45,8 @@ static const char *const mode_names[ROUTE_MODES] = {
 };
 
 static lv_obj_t *img, *lbl_info, *lbl_mode, *lbl_note, *lbl_route;
+static lv_obj_t *turn_panel, *turn_line[3], *lbl_turn_dist, *lbl_turn_road, *lbl_turn_trip;
+static bool metric;                        /* the bike's unit setting */
 static lv_obj_t *menu, *menu_rows[MENU_ROWS];
 static int level = 15;
 static bool heading_up = true;
@@ -95,6 +97,7 @@ static void clear_route(void);
 static void search(const char *query);
 static void open_menu_mode(enum menu_mode m);
 static void close_menu(void);
+static void show_next_turn(const struct hbas_route_pos *pos);
 
 static void show_info(void)
 {
@@ -105,24 +108,22 @@ static void show_route_banner(const char *text)
 {
 	if (!text) {
 		lv_obj_add_flag(lbl_route, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(turn_panel, LV_OBJ_FLAG_HIDDEN);
 		return;
 	}
 	lv_label_set_text(lbl_route, text);
 	lv_obj_remove_flag(lbl_route, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_add_flag(turn_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* "189 km  2 h 07" / "800 m  3 min" */
-static void format_trip(char *buf, size_t len, double dist_m, double secs)
+static __attribute__((unused)) void format_trip(char *buf, size_t len, double dist_m,
+						 double secs)
 {
 	int min = (int)lround(secs / 60);
 	char d[16], t[16];
 
-	if (dist_m < 1000)
-		snprintf(d, sizeof(d), "%d m", (int)lround(dist_m / 10) * 10);
-	else if (dist_m < 10000)
-		snprintf(d, sizeof(d), "%.1f km", dist_m / 1000);
-	else
-		snprintf(d, sizeof(d), "%d km", (int)lround(dist_m / 1000));
+	hbas_nav_distance(d, sizeof(d), dist_m, metric);
 	if (min < 60)
 		snprintf(t, sizeof(t), "%d min", min < 1 ? 1 : min);
 	else
@@ -161,6 +162,9 @@ static struct {
 	bool failed;
 } job = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, .ready_buf = -1 };
 static double job_lat[ROUTE_POINTS_MAX], job_lon[ROUTE_POINTS_MAX];   /* under job.lock */
+#define STEPS_MAX 1024
+static struct hbas_route_step job_steps[STEPS_MAX], steps[STEPS_MAX];
+static size_t job_n_steps, n_steps;
 
 static uint16_t buf[2][MAP_W * MAP_H];
 static lv_image_dsc_t dsc[2];
@@ -254,6 +258,8 @@ static void *worker_main(void *arg)
 								 ROUTE_POINTS_MAX);
 
 				job.route_n = n < ROUTE_POINTS_MAX ? n : ROUTE_POINTS_MAX;
+				n = hbas_map_route_steps(map, job_steps, STEPS_MAX);
+				job_n_steps = n < STEPS_MAX ? n : STEPS_MAX;
 			}
 			job.route_done = true;
 			job.route_ok = rc == 0;
@@ -459,6 +465,7 @@ void ui_map_tick(void)
 	pthread_mutex_lock(&job.lock);
 	if (job.route_done) {
 		char text[192], trip[40];
+		bool want_turn_panel = false;
 
 		job.route_done = false;
 		if (dest.busy) {
@@ -471,12 +478,15 @@ void ui_map_tick(void)
 				memcpy(dest.lon_pts, job_lon, job.route_n * sizeof(double));
 				hbas_route_line_init(&dest.line, dest.lat_pts, dest.lon_pts,
 						     job.route_n);
+				memcpy(steps, job_steps, job_n_steps * sizeof(steps[0]));
+				n_steps = job_n_steps;
 				if (!dest.rerouting)
 					hbas_route_follow_reset(&dest.follow);
 				dest.follow.off_count = 0;
 				format_trip(trip, sizeof(trip), dest.trip_m, dest.trip_s);
 				snprintf(text, sizeof(text), "To %s\n%s  %s", dest.name, trip,
 					 mode_names[dest.mode]);
+				want_turn_panel = true;
 			} else if (dest.rerouting && dest.active) {
 				/* keep following the old one; try again later */
 				snprintf(text, sizeof(text), "Off route to %s:\n%s", dest.name,
@@ -488,6 +498,12 @@ void ui_map_tick(void)
 			}
 			dest.rerouting = false;
 			show_route_banner(text);
+			if (want_turn_panel) {
+				struct hbas_route_pos pos;
+
+				hbas_route_locate(&dest.line, gps.lat, gps.lon, 0, &pos);
+				show_next_turn(&pos);
+			}
 		}
 	}
 	if (job.search_done) {
@@ -519,6 +535,122 @@ void ui_map_tick(void)
 	lv_obj_add_flag(lbl_note, LV_OBJ_FLAG_HIDDEN);
 	lv_label_set_text_fmt(lbl_info, "%d ms", (int)ms);
 }
+/* ---- next-turn panel ------------------------------------------------------ */
+
+/* The arrow: a bent shaft (from the bottom middle of a 44 x 44 box) and a
+ * head at its tip, in the direction of its last part. */
+static lv_point_precise_t arrow_pts[3][3];
+
+static void set_arrow(enum hbas_turn t)
+{
+	/* the shaft's bend and tip, by turn */
+	static const struct { int bx, by, tx, ty; } shape[] = {
+		[HBAS_TURN_STRAIGHT] = { 22, 22, 22, 5 },
+		[HBAS_TURN_SLIGHT_LEFT] = { 22, 26, 10, 10 },
+		[HBAS_TURN_LEFT] = { 22, 20, 5, 20 },
+		[HBAS_TURN_SHARP_LEFT] = { 22, 14, 8, 30 },
+		[HBAS_TURN_SLIGHT_RIGHT] = { 22, 26, 34, 10 },
+		[HBAS_TURN_RIGHT] = { 22, 20, 39, 20 },
+		[HBAS_TURN_SHARP_RIGHT] = { 22, 14, 36, 30 },
+		[HBAS_TURN_ROUNDABOUT] = { 22, 22, 22, 5 },
+		[HBAS_TURN_MOTORWAY_ENTER] = { 22, 26, 34, 10 },
+		[HBAS_TURN_MOTORWAY_EXIT_LEFT] = { 22, 26, 10, 10 },
+		[HBAS_TURN_MOTORWAY_EXIT_RIGHT] = { 22, 26, 34, 10 },
+		[HBAS_TURN_KEEP_LEFT] = { 22, 26, 12, 8 },
+		[HBAS_TURN_KEEP_RIGHT] = { 22, 26, 32, 8 },
+		[HBAS_TURN_ARRIVE] = { 22, 22, 22, 5 },
+	};
+	int k = (unsigned)t < sizeof(shape) / sizeof(shape[0]) ? (int)t : 0;
+	double dx = shape[k].tx - shape[k].bx, dy = shape[k].ty - shape[k].by;
+	double len = sqrt(dx * dx + dy * dy), ux = dx / len, uy = dy / len;
+
+	arrow_pts[0][0] = (lv_point_precise_t){ 22, 42 };
+	arrow_pts[0][1] = (lv_point_precise_t){ shape[k].bx, shape[k].by };
+	arrow_pts[0][2] = (lv_point_precise_t){ shape[k].tx, shape[k].ty };
+	/* head: two strokes back from the tip, 45 degrees either side */
+	for (int side = 0; side < 2; side++) {
+		double a = side ? 2.356 : -2.356, c = cos(a), sn = sin(a);
+		double hx = (ux * c - uy * sn) * 11, hy = (ux * sn + uy * c) * 11;
+
+		arrow_pts[1 + side][0] = (lv_point_precise_t){ shape[k].tx, shape[k].ty };
+		arrow_pts[1 + side][1] = (lv_point_precise_t){ shape[k].tx + hx, shape[k].ty + hy };
+	}
+	lv_line_set_points(turn_line[0], arrow_pts[0], 3);
+	lv_line_set_points(turn_line[1], arrow_pts[1], 2);
+	lv_line_set_points(turn_line[2], arrow_pts[2], 2);
+}
+
+static const char *turn_words(const struct hbas_route_step *st, char *buf, size_t len)
+{
+	static const char *const verbs[] = {
+		[HBAS_TURN_STRAIGHT] = "Continue",
+		[HBAS_TURN_SLIGHT_LEFT] = "Bear left", [HBAS_TURN_LEFT] = "Left",
+		[HBAS_TURN_SHARP_LEFT] = "Sharp left",
+		[HBAS_TURN_SLIGHT_RIGHT] = "Bear right", [HBAS_TURN_RIGHT] = "Right",
+		[HBAS_TURN_SHARP_RIGHT] = "Sharp right",
+		[HBAS_TURN_MOTORWAY_ENTER] = "Take the ramp",
+		[HBAS_TURN_MOTORWAY_EXIT_LEFT] = "Exit left",
+		[HBAS_TURN_MOTORWAY_EXIT_RIGHT] = "Exit right",
+		[HBAS_TURN_KEEP_LEFT] = "Keep left", [HBAS_TURN_KEEP_RIGHT] = "Keep right",
+	};
+	const char *onto = st->turn == HBAS_TURN_MOTORWAY_EXIT_LEFT ||
+			   st->turn == HBAS_TURN_MOTORWAY_EXIT_RIGHT ? "to" : "onto";
+
+	if (st->turn == HBAS_TURN_ARRIVE)
+		snprintf(buf, len, "Arrive at %s", dest.name);
+	else if (st->turn == HBAS_TURN_ROUNDABOUT && st->exit > 0)
+		snprintf(buf, len, "Roundabout, exit %d%s%s", st->exit, st->name[0] ? " - " : "",
+			 st->name);
+	else if (st->turn == HBAS_TURN_ROUNDABOUT)
+		snprintf(buf, len, "Roundabout%s%s", st->name[0] ? " - " : "", st->name);
+	else if (st->name[0])
+		snprintf(buf, len, "%s %s %s", verbs[st->turn], onto, st->name);
+	else
+		snprintf(buf, len, "%s", verbs[st->turn]);
+	return buf;
+}
+
+/* The next manoeuvre after `along` metres of the route (in the
+ * description's distances), or NULL. */
+static const struct hbas_route_step *next_step(double along)
+{
+	for (size_t i = 0; i < n_steps; i++)
+		if (steps[i].dist_m > along + 5)
+			return &steps[i];
+	return NULL;
+}
+
+static void show_next_turn(const struct hbas_route_pos *pos)
+{
+	/* the description's distances and our route line's differ a little:
+	 * scale ours to theirs */
+	double scale = dest.line.total_m > 0 ? dest.trip_m / dest.line.total_m : 1;
+	double along = pos->done_m * scale;
+	const struct hbas_route_step *st = next_step(along);
+	char d[16], words[96], trip[40];
+
+	if (!st)
+		return;
+	hbas_nav_distance(d, sizeof(d), st->dist_m - along, metric);
+	set_arrow(st->turn);
+	lv_label_set_text(lbl_turn_dist, d);
+	lv_label_set_text(lbl_turn_road, turn_words(st, words, sizeof(words)));
+	format_trip(trip, sizeof(trip), pos->remaining_m * scale,
+		    dest.trip_m > 0 ? dest.trip_s * pos->remaining_m * scale / dest.trip_m : 0);
+	lv_label_set_text_fmt(lbl_turn_trip, "%s  %s", dest.name, trip);
+	lv_obj_add_flag(lbl_route, LV_OBJ_FLAG_HIDDEN);
+	lv_obj_remove_flag(turn_panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+bool ui_map_next_turn(char *buf, size_t len)
+{
+	if (lv_obj_has_flag(turn_panel, LV_OBJ_FLAG_HIDDEN))
+		return false;
+	snprintf(buf, len, "%s: %s", lv_label_get_text(lbl_turn_dist),
+		 lv_label_get_text(lbl_turn_road));
+	return true;
+}
+
 #else
 void ui_map_open(const char *db, const char *style, const char *font)
 {
@@ -535,6 +667,15 @@ static void route_to(const char *name, double lat, double lon)
 	(void)name; (void)lat; (void)lon;
 }
 static void clear_route(void) {}
+static void show_next_turn(const struct hbas_route_pos *pos)
+{
+	(void)pos;
+}
+bool ui_map_next_turn(char *buf, size_t len)
+{
+	(void)buf; (void)len;
+	return false;
+}
 static void search(const char *query)
 {
 	(void)query;
@@ -905,6 +1046,37 @@ void ui_map_build(lv_obj_t *p)
 	lv_obj_align(lbl_route, LV_ALIGN_TOP_LEFT, 6, 28);
 	lv_obj_add_flag(lbl_route, LV_OBJ_FLAG_HIDDEN);
 
+	/* next turn: arrow, distance, what to do; destination and time left */
+	turn_panel = lv_obj_create(p);
+	lv_obj_remove_style_all(turn_panel);
+	lv_obj_set_size(turn_panel, 310, 70);
+	lv_obj_set_pos(turn_panel, 4, 24);
+	lv_obj_set_style_bg_color(turn_panel, COL_BG, 0);
+	lv_obj_set_style_bg_opa(turn_panel, LV_OPA_80, 0);
+	lv_obj_set_style_radius(turn_panel, 6, 0);
+	lv_obj_set_style_border_side(turn_panel, LV_BORDER_SIDE_LEFT, 0);
+	lv_obj_set_style_border_width(turn_panel, 3, 0);
+	lv_obj_set_style_border_color(turn_panel, COL_ACCENT, 0);
+	lv_obj_remove_flag(turn_panel, LV_OBJ_FLAG_SCROLLABLE);
+	for (int i = 0; i < 3; i++) {
+		turn_line[i] = lv_line_create(turn_panel);
+		lv_obj_set_pos(turn_line[i], 8, 4);
+		lv_obj_set_style_line_width(turn_line[i], 6, 0);
+		lv_obj_set_style_line_color(turn_line[i], COL_ACCENT, 0);
+		lv_obj_set_style_line_rounded(turn_line[i], true, 0);
+	}
+	lbl_turn_dist = ui_label(turn_panel, &lv_font_montserrat_28, COL_TEXT, "");
+	lv_obj_set_pos(lbl_turn_dist, 60, 2);
+	lbl_turn_road = ui_label(turn_panel, &lv_font_montserrat_14, COL_TEXT, "");
+	lv_obj_set_pos(lbl_turn_road, 60, 34);
+	lv_obj_set_width(lbl_turn_road, 244);
+	lv_label_set_long_mode(lbl_turn_road, LV_LABEL_LONG_DOT);
+	lbl_turn_trip = ui_label(turn_panel, &lv_font_montserrat_14, COL_DIM, "");
+	lv_obj_set_pos(lbl_turn_trip, 8, 51);
+	lv_obj_set_width(lbl_turn_trip, 296);
+	lv_label_set_long_mode(lbl_turn_trip, LV_LABEL_LONG_DOT);
+	lv_obj_add_flag(turn_panel, LV_OBJ_FLAG_HIDDEN);
+
 	/* the navigation menu */
 	menu = lv_obj_create(p);
 	lv_obj_remove_style_all(menu);
@@ -934,7 +1106,7 @@ void ui_map_build(lv_obj_t *p)
 static void follow_route(void)
 {
 	struct hbas_route_pos pos;
-	char text[160], trip[40];
+	char text[160];
 	/* HDOP x ~5 m is a rough horizontal error for a u-blox 5/6 */
 	double accuracy = gps.hdop > 0 ? gps.hdop * 5.0 : 0;
 
@@ -950,14 +1122,14 @@ static void follow_route(void)
 		route_to(dest.name, dest.lat, dest.lon);
 		break;
 	case HBAS_ROUTE_ON:
-		format_trip(trip, sizeof(trip), pos.remaining_m,
-			    dest.line.total_m > 0 ?
-			    dest.trip_s * pos.remaining_m / dest.line.total_m : 0);
-		snprintf(text, sizeof(text), "To %s\n%s  %s", dest.name, trip,
-			 mode_names[dest.mode]);
-		show_route_banner(text);
+		show_next_turn(&pos);
 		break;
 	}
+}
+
+void ui_map_set_metric(bool m)
+{
+	metric = m;
 }
 
 void ui_map_gps(const struct hbas_gps_view *v)

@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: CHECK(%s) failed\n", \
@@ -67,8 +68,31 @@ static void test_follow(void)
 	      HBAS_ROUTE_ARRIVED);
 }
 
+static void test_distance(void)
+{
+	char b[16];
+
+	hbas_nav_distance(b, sizeof(b), 84, true);
+	CHECK(!strcmp(b, "80 m"));
+	hbas_nav_distance(b, sizeof(b), 437, true);
+	CHECK(!strcmp(b, "450 m"));
+	hbas_nav_distance(b, sizeof(b), 1234, true);
+	CHECK(!strcmp(b, "1.2 km"));
+	hbas_nav_distance(b, sizeof(b), 14400, true);
+	CHECK(!strcmp(b, "14 km"));
+	hbas_nav_distance(b, sizeof(b), 91, false);      /* 299 ft */
+	CHECK(!strcmp(b, "300 ft"));
+	hbas_nav_distance(b, sizeof(b), 483, false);     /* 0.3 mi */
+	CHECK(!strcmp(b, "0.3 mi"));
+	hbas_nav_distance(b, sizeof(b), 19312, false);   /* 12 mi */
+	CHECK(!strcmp(b, "12 mi"));
+	hbas_nav_distance(b, sizeof(b), -5, true);
+	CHECK(!strcmp(b, "0 m"));
+}
+
 int main(void)
 {
+	test_distance();
 	test_locate();
 	test_follow();
 	if (failures)

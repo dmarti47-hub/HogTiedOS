@@ -272,6 +272,7 @@ void ui_update(const struct hbas_vehicle *v)
 		lv_label_set_text(lbl_speed, "--");
 	lv_label_set_text(lbl_speed_unit, v->metric ? "km/h" : "mph");
 	ui_gps_set_metric(v->metric);
+	ui_map_set_metric(v->metric);
 
 	if (v->seen & HBAS_SEEN_ENG2) {
 		/* Gear value meanings aren't defined in stock code; show the number. */
