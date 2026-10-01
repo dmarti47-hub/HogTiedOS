@@ -357,3 +357,56 @@ mode 3)**, 8-bit words, CS active low, and the clock actually programmed
 is **750 kHz** (48 MHz / 64). The bring-up report's "mode 1" is wrong.
 (The boot-IFS and secondary copies of spi-omap3530.so differ; the boot copy
 is the one `spi-master -domap3530` uses for the IOC bus.)
+
+## 13. Buttons: IOC channel 3, verified in stock iocInterface
+
+Sources: `secondary/usr/bin/iocInterface` (compiled; disassembled with
+`tools/re/qnxdis.py`), `etc/multipleKeyMaps.cfg`, and
+`etc/system/config/PRE_CAL/cfg/btnCfg.xml`, whose stuck-button comments
+name each key code. Stock runs `iocInterface -c /etc/multipleKeyMaps.cfg -d
+/mnt/persistence -t .../btnCfg.xml` (boot.sh:167).
+
+**Message:** `[ID lo, ID hi, length, payload...]`; dispatch at 0x104F60:
+0x0550 left handlebar, 0x0570 right handlebar, 0xFACE front controls,
+0xFEE1 touch.
+
+**Key events** (helper 0x104420): for each (payload byte, mask, key code),
+when the bit changes versus the previous message: set → press `code`,
+clear → release `code | 0x8000`. Codes are ASCII; `btnCfg.xml` names them.
+
+**Handlebar layout.** Each handlebar has two decoders, chosen by a byte
+(0x10A13C + 0x244, copied from +0x14). The struct is in .bss, its only
+reference is the reader at 0x1052F4, and no code writes +0x14, so the flag
+is always 0. That selects **layout A** (0x104C0C right, 0x104D34 left).
+Layout B (0x104B84 / 0x104E70) is never used by this firmware; it's the one
+the bring-up report describes. Payload byte index = offset after the
+3-byte header:
+
+| Right (0x0570), layout A | | Left (0x0550), layout A | |
+|---|---|---|---|
+| p3 & 0x01 `U` right-up | | p3 & 0x01 `W` left-up | |
+| p3 & 0x10 `J` right-down | | p3 & 0x10 `S` left-down | |
+| p3 & 0x02 `H` right-left | | p3 & 0x02 `A` left-left | |
+| p3 & 0x08 `K` right-right | | p3 & 0x08 `D` left-right | |
+| p3 & 0x04 Enter (13) right-center | | p3 & 0x04 Space (32) left-center | |
+| p1 & 0x01 `X` system info | | p1 & 0x01 `+`, p1 & 0x08 `;`, p1 & 0x10 `'`, p1 & 0x20 `` ` `` | |
+| p4 & 0x01 `T` squelch up | | p2 & 0x01 `F` | |
+| p4 & 0x10 `M` squelch down | | p4 & 0x01 `/`, p4 & 0x04 `Z`, p4 & 0x10 `L` | |
+| p4 & 0x04 `R` driver push-to-talk | | p5 & 0x01 `V` | |
+| p1 & 0x08 `\`, p1 & 0x10 `,`, p1 & 0x20 `.`, p2 & 0x01 `G` | | | |
+
+Keys without a name in btnCfg.xml are listed by code only. (Layout B,
+unused: right p0&0x10 U, p0&0x20 J, p2&0x10 H, p1&0x02 K, p0&0x40 Enter;
+left p0&0x80 D, p1&0x04 W, p1&0x08 Space, p1&0x10 S, p1&0x20 T, p1&0x40 R,
+p1&0x80 M, p2&0x10 A, p2&0x80 V.)
+
+**Front controls (0xFACE):** 4 payload bytes, table at 0x108768, key =
+table[byte*8 + bit]: byte 0 bits 0-3 = `O` power, `I` home, `C` favorite,
+`N` nav (multipleKeyMaps.cfg labels: POWER, INT, COMM, NAV); byte 1 bits 0-7 =
+`1`-`8` (presets / soft keys 1-8); byte 2 = `9 0 - ] Q E`; byte 3 =
+`Y U I O P [` (unnamed). When more than one bit of bytes 0-1 is set, stock
+looks the 16-bit mask up in multipleKeyMaps.cfg (e.g. 0x0006 → `D`) instead of
+emitting the single keys.
+
+btnCfg.xml also names 69 `E` rear push-to-talk and 187 VR push-to-talk, which
+these tables don't produce directly.
