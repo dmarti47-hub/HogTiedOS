@@ -13,6 +13,7 @@
 
 #include "hbas/bike.h"
 
+#include <math.h>
 #include <stdio.h>
 
 
@@ -23,11 +24,15 @@ static lv_obj_t *dots[UI_PAGE_COUNT];
 static enum ui_page page;
 static void show_page(enum ui_page n);
 
-/* Dash */
-static lv_obj_t *lbl_speed, *lbl_speed_unit, *lbl_gear, *bar_rpm, *lbl_rpm;
-static lv_obj_t *lbl_clock, *lbl_ambient, *lbl_ign;
-static lv_obj_t *ind_engine, *ind_oil, *ind_fuel, *ind_temp;
-static struct ui_gauge g_engine, g_coolant;
+/* Dash: a retrowave two-dial cluster (tach + speed). */
+#define DIAL_R 80                         /* scene radius */
+#define DIAL_W (DIAL_R * 2)
+static lv_obj_t *sc_tach, *sc_speed, *ndl_tach, *ndl_speed;
+static lv_obj_t *lbl_speed, *lbl_speed_unit, *lbl_gear, *lbl_rpm;
+static lv_obj_t *lbl_clock, *lbl_ambient;
+static lv_obj_t *tt_oil, *tt_fuel, *tt_temp;   /* telltales, shown only when active */
+static bool dash_metric;
+static uint16_t scene_buf[2][DIAL_W * DIAL_W];
 /* Tires */
 static lv_obj_t *lbl_tire[HBAS_TIRE_COUNT], *lbl_tpms_state;
 static lv_obj_t *tire_panel[HBAS_TIRE_COUNT], *lbl_tire_name[HBAS_TIRE_COUNT];
@@ -60,24 +65,6 @@ lv_obj_t *ui_panel(lv_obj_t *parent, int x, int y, int w, int h)
 	return p;
 }
 
-static lv_obj_t *indicator(lv_obj_t *parent, const char *txt)
-{
-	lv_obj_t *l = ui_label(parent, &lv_font_montserrat_14, COL_DIM, txt);
-
-	lv_obj_set_style_pad_hor(l, 6, 0);
-	lv_obj_set_style_pad_ver(l, 2, 0);
-	lv_obj_set_style_radius(l, 4, 0);
-	lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_color(l, COL_PANEL, 0);
-	return l;
-}
-
-static void indicator_set(lv_obj_t *ind, bool on, lv_color_t on_col)
-{
-	lv_obj_set_style_text_color(ind, on ? COL_BG : COL_DIM, 0);
-	lv_obj_set_style_bg_color(ind, on ? on_col : COL_PANEL, 0);
-}
-
 static lv_obj_t *page_create(lv_obj_t *scr, const char *title)
 {
 	lv_obj_t *p = lv_obj_create(scr);
@@ -91,69 +78,235 @@ static lv_obj_t *page_create(lv_obj_t *scr, const char *title)
 	return p;
 }
 
+static inline uint16_t rgb565(int r, int g, int b)
+{
+	r = r < 0 ? 0 : r > 255 ? 255 : r;
+	g = g < 0 ? 0 : g > 255 ? 255 : g;
+	b = b < 0 ? 0 : b > 255 ? 255 : b;
+	return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+/* Paint one retrowave dial face (sunset sky, neon sun, perspective grid)
+ * into a DIAL_W x DIAL_W RGB565 buffer. Pixels outside the circle are dark
+ * (the circular parent clips them). */
+static void paint_scene(uint16_t *buf)
+{
+	const int W = DIAL_W, c = DIAL_R;
+	const int hy = (int)(DIAL_R * 1.12);           /* horizon */
+	const int gh = W - hy;
+	const double sunr = DIAL_R * 0.66;
+
+	for (int y = 0; y < W; y++) {
+		for (int x = 0; x < W; x++) {
+			int dx = x - c, dy = y - c;
+			uint16_t px;
+
+			if (dx * dx + dy * dy > c * c) {
+				buf[y * W + x] = rgb565(8, 6, 16);
+				continue;
+			}
+			if (y < hy) {
+				/* sky: magenta (top) -> orange (horizon) */
+				double t = (double)y / hy;
+				int r = (int)(0xE0 + (0xFF - 0xE0) * t);
+				int g = (int)(0x1C + (0x8A - 0x1C) * t);
+				int b = (int)(0x8E + (0x3D - 0x8E) * t);
+				double sdx = x - c, sdy = y - (hy - sunr * 0.15);
+
+				if (sdx * sdx + sdy * sdy < sunr * sunr) {
+					/* the sun, with dark scanline gaps */
+					double st = (double)y / hy;
+					int band = (hy - y) / 5;
+
+					if (!(band & 1) || y > hy - sunr * 0.9) {
+						r = (int)(0xFF);
+						g = (int)(0xE8 - 0xB0 * st);
+						b = (int)(0x6A + 0x30 * st);
+					}
+				}
+				px = rgb565(r, g, b);
+			} else {
+				/* ground: dark with a cyan perspective grid */
+				int gy = y - hy;
+				double p = (double)gy / gh;
+				int r = 12, g = 7, b = 26;
+				/* horizontal lines, spacing grows toward the viewer */
+				double lines[] = { 0.10, 0.24, 0.42, 0.65, 0.92 };
+
+				for (unsigned k = 0; k < sizeof(lines) / sizeof(lines[0]); k++)
+					if (p > lines[k] - 0.012 && p < lines[k] + 0.012) {
+						r = 0x1F; g = 0xE0; b = 0xD6;
+					}
+				/* vertical lines fanning from the vanishing point */
+				if (gy > 0) {
+					double xb = c + (double)(x - c) * gh / gy;
+					double step = DIAL_R * 0.5;
+
+					double m = fmod(fabs(xb - c), step);
+					if (m < 2.0 || m > step - 2.0) {
+						r = 0x1F; g = 0xE0; b = 0xD6;
+					}
+				}
+				px = rgb565(r, g, b);
+			}
+			buf[y * W + x] = px;
+		}
+	}
+}
+
+/* A circular dial face: the painted scene clipped to a circle, with a neon
+ * rim. Returns the circular container (the scale is placed over it). */
+static lv_obj_t *build_scene(lv_obj_t *parent, int cx, int cy, uint16_t *buf)
+{
+	lv_obj_t *circ = lv_obj_create(parent);
+	lv_obj_t *cv;
+
+	paint_scene(buf);
+	lv_obj_remove_style_all(circ);
+	lv_obj_set_size(circ, DIAL_W, DIAL_W);
+	lv_obj_set_pos(circ, cx - DIAL_R, cy - DIAL_R);
+	lv_obj_set_style_radius(circ, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_clip_corner(circ, true, 0);
+	lv_obj_set_style_border_width(circ, 0, 0);
+	lv_obj_remove_flag(circ, LV_OBJ_FLAG_SCROLLABLE);
+
+	cv = lv_canvas_create(circ);
+	lv_canvas_set_buffer(cv, buf, DIAL_W, DIAL_W, LV_COLOR_FORMAT_RGB565);
+	lv_obj_center(cv);
+	return circ;
+}
+
+/* A round tick scale around a dial, with a glowing line needle. */
+static lv_obj_t *build_dial(lv_obj_t *parent, int cx, int cy, int min, int max, int ticks,
+			    int major_every, int redline, lv_obj_t **needle)
+{
+	lv_obj_t *scale = lv_scale_create(parent);
+	lv_obj_t *n;
+
+	lv_obj_remove_style_all(scale);          /* drop the theme's box border/bg */
+	lv_scale_set_mode(scale, LV_SCALE_MODE_ROUND_INNER);
+	lv_obj_set_size(scale, DIAL_W + 28, DIAL_W + 28);
+	lv_obj_set_pos(scale, cx - DIAL_R - 14, cy - DIAL_R - 14);
+	lv_scale_set_rotation(scale, 135);
+	lv_scale_set_angle_range(scale, 270);
+	lv_scale_set_range(scale, min, max);
+	lv_scale_set_total_tick_count(scale, ticks);
+	lv_scale_set_major_tick_every(scale, major_every);
+	lv_obj_set_style_bg_opa(scale, LV_OPA_TRANSP, LV_PART_MAIN);
+	lv_obj_set_style_border_opa(scale, LV_OPA_TRANSP, LV_PART_MAIN);
+	lv_obj_set_style_outline_opa(scale, LV_OPA_TRANSP, LV_PART_MAIN);
+	lv_obj_set_style_line_opa(scale, LV_OPA_TRANSP, LV_PART_MAIN);
+	lv_obj_set_style_pad_all(scale, 0, LV_PART_MAIN);
+	/* minor ticks: dim cyan; major ticks + labels: neon */
+	lv_obj_set_style_line_color(scale, COL_COOL, LV_PART_ITEMS);
+	lv_obj_set_style_line_width(scale, 2, LV_PART_ITEMS);
+	lv_obj_set_style_length(scale, 6, LV_PART_ITEMS);
+	lv_obj_set_style_line_color(scale, COL_ACCENT, LV_PART_INDICATOR);
+	lv_obj_set_style_line_width(scale, 3, LV_PART_INDICATOR);
+	lv_obj_set_style_length(scale, 11, LV_PART_INDICATOR);
+	lv_obj_set_style_text_color(scale, COL_TEXT, LV_PART_INDICATOR);
+	lv_obj_set_style_text_font(scale, FONT_TINY, LV_PART_INDICATOR);
+
+	if (redline > min) {
+		lv_scale_section_t *sec = lv_scale_add_section(scale);
+		static lv_style_t rs, ri;
+
+		lv_style_init(&rs);
+		lv_style_set_line_color(&rs, COL_ALARM);
+		lv_style_set_line_width(&rs, 4);
+		lv_style_init(&ri);
+		lv_style_set_line_color(&ri, COL_ALARM);
+		lv_style_set_line_width(&ri, 3);
+		lv_scale_section_set_range(sec, redline, max);
+		lv_scale_section_set_style(sec, LV_PART_INDICATOR, &rs);
+		lv_scale_section_set_style(sec, LV_PART_ITEMS, &ri);
+	}
+
+	n = lv_line_create(scale);
+	lv_obj_set_style_line_color(n, COL_COOL, 0);
+	lv_obj_set_style_line_width(n, 4, 0);
+	lv_obj_set_style_line_rounded(n, true, 0);
+	lv_scale_set_line_needle_value(scale, n, DIAL_R - 14, min);
+	*needle = n;
+	return scale;
+}
+
+static lv_obj_t *telltale(lv_obj_t *parent, const char *txt, lv_color_t col)
+{
+	lv_obj_t *l = ui_label(parent, FONT_XS, col, txt);
+
+	lv_obj_set_style_pad_hor(l, 5, 0);
+	lv_obj_set_style_pad_ver(l, 1, 0);
+	lv_obj_set_style_radius(l, 4, 0);
+	lv_obj_set_style_border_color(l, col, 0);
+	lv_obj_set_style_border_width(l, 1, 0);
+	lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+	return l;
+}
+
 static void build_dash(lv_obj_t *p)
 {
-	lv_obj_t *speed = ui_card(p, 6, 28, 224, 150);
-	lv_obj_t *gear = ui_card(p, 236, 28, 158, 46);
-	lv_obj_t *strip, *cap;
+	lv_obj_t *tt_row, *cap;
+	const int cyl = 112, lx = 92, rx = 308;
 
-	/* speed, the hero number */
-	lbl_speed = ui_label(speed, FONT_HERO, COL_TEXT, "--");
-	lv_obj_align(lbl_speed, LV_ALIGN_CENTER, 0, -22);
-	lv_obj_set_style_transform_scale(lbl_speed, 486, 0);     /* ~1.9x of 48 px */
-	lv_obj_set_style_transform_pivot_x(lbl_speed, LV_PCT(50), 0);
-	lv_obj_set_style_transform_pivot_y(lbl_speed, LV_PCT(50), 0);
-	lbl_speed_unit = ui_label(speed, FONT_SM, COL_DIM, "mph");
-	lv_obj_align(lbl_speed_unit, LV_ALIGN_CENTER, 0, 24);
+	/* no page title on the dash; the dials own the screen */
+	lv_obj_add_flag(lv_obj_get_child(p, 0), LV_OBJ_FLAG_HIDDEN);
 
-	/* rpm bar along the bottom of the speed card */
-	bar_rpm = lv_bar_create(speed);
-	lv_obj_remove_style_all(bar_rpm);
-	lv_obj_set_size(bar_rpm, 200, 6);
-	lv_obj_align(bar_rpm, LV_ALIGN_BOTTOM_MID, 0, -22);
-	lv_bar_set_range(bar_rpm, 0, RPM_MAX);
-	lv_obj_set_style_radius(bar_rpm, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-	lv_obj_set_style_radius(bar_rpm, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_opa(bar_rpm, LV_OPA_COVER, LV_PART_MAIN);
-	lv_obj_set_style_bg_color(bar_rpm, COL_BG, LV_PART_MAIN);
-	lv_obj_set_style_bg_opa(bar_rpm, LV_OPA_COVER, LV_PART_INDICATOR);
-	lv_obj_set_style_bg_color(bar_rpm, COL_ACCENT, LV_PART_INDICATOR);
-	lbl_rpm = ui_label(speed, FONT_TINY, COL_DIM, "---- rpm");
-	lv_obj_align(lbl_rpm, LV_ALIGN_BOTTOM_MID, 0, -6);
+	/* deep purple-black backdrop */
+	lv_obj_set_style_bg_color(p, lv_color_hex(0x0A0612), 0);
+	lv_obj_set_style_bg_grad_color(p, lv_color_hex(0x16081F), 0);
+	lv_obj_set_style_bg_grad_dir(p, LV_GRAD_DIR_VER, 0);
+	lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
 
-	/* gear */
-	cap = ui_label(gear, FONT_XS, COL_DIM, "GEAR");
-	lv_obj_align(cap, LV_ALIGN_LEFT_MID, 10, 0);
-	lbl_gear = ui_label(gear, FONT_XL, COL_ACCENT, "-");
-	lv_obj_align(lbl_gear, LV_ALIGN_RIGHT_MID, -16, 0);
+	sc_tach = build_scene(p, lx, cyl, scene_buf[0]);
+	sc_speed = build_scene(p, rx, cyl, scene_buf[1]);
 
-	/* engine and coolant temperature (relative: raw units unverified) */
-	ui_gauge_init(&g_engine, ui_card(p, 236, 80, 158, 46), 10, 6, 138, 34, "ENGINE");
-	ui_gauge_init(&g_coolant, ui_card(p, 236, 132, 158, 46), 10, 6, 138, 34, "COOLANT");
-	/* display spans are placeholders until the raw encoding is read on
-	 * hardware; the HOT state comes from the decoded overtemp telltale */
-	ui_gauge_range(&g_engine, 40, 240, 0, 0);
-	ui_gauge_range(&g_coolant, 40, 220, 0, 0);
+	/* tach 0-8 (x1000), redline from 6; speed 0-160 mph (relabeled if metric) */
+	build_dial(p, lx, cyl, 0, 8, 41, 5, 6, &ndl_tach);
+	build_dial(p, rx, cyl, 0, 160, 33, 4, 0, &ndl_speed);
 
-	/* warnings + ignition + ambient, along the bottom */
-	strip = lv_obj_create(p);
-	lv_obj_remove_style_all(strip);
-	lv_obj_set_pos(strip, 6, 186);
-	lv_obj_set_size(strip, 388, 30);
-	lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(strip, 6, 0);
-	ind_engine = indicator(strip, "ENGINE");
-	ind_oil = indicator(strip, "OIL");
-	ind_fuel = indicator(strip, "FUEL");
-	ind_temp = indicator(strip, "HOT");
-	lbl_ign = ui_label(strip, FONT_XS, COL_DIM, "KEY --");
-	lbl_ambient = ui_label(strip, FONT_XS, COL_TEXT, "--.- C");
+	/* digital readouts low in each dial, over the dark grid for contrast */
+	lbl_rpm = ui_label(p, FONT_MD, COL_TEXT, "----");
+	lv_obj_set_width(lbl_rpm, 100);
+	lv_obj_set_style_text_align(lbl_rpm, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_align(lbl_rpm, LV_ALIGN_CENTER, lx - 200, 42);
+	cap = ui_label(p, FONT_TINY, COL_DIM, "RPM");
+	lv_obj_set_width(cap, 100);
+	lv_obj_set_style_text_align(cap, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_align(cap, LV_ALIGN_CENTER, lx - 200, 66);
 
-	/* clock, top right */
+	lbl_speed = ui_label(p, FONT_XL, COL_TEXT, "--");
+	lv_obj_set_width(lbl_speed, 100);
+	lv_obj_set_style_text_align(lbl_speed, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_align(lbl_speed, LV_ALIGN_CENTER, rx - 200, 40);
+	lbl_speed_unit = ui_label(p, FONT_TINY, COL_DIM, "mph");
+	lv_obj_set_width(lbl_speed_unit, 100);
+	lv_obj_set_style_text_align(lbl_speed_unit, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_align(lbl_speed_unit, LV_ALIGN_CENTER, rx - 200, 66);
+
+	/* centre column: clock (top-left), gear (middle) */
 	lbl_clock = ui_label(p, FONT_RG, COL_TEXT, "--:--");
-	lv_obj_align(lbl_clock, LV_ALIGN_TOP_RIGHT, -12, 5);
+	lv_obj_align(lbl_clock, LV_ALIGN_TOP_LEFT, 12, 6);
+	cap = ui_label(p, FONT_TINY, COL_COOL, "GEAR");
+	lv_obj_align(cap, LV_ALIGN_CENTER, 0, -18);
+	lbl_gear = ui_label(p, FONT_XL, COL_ACCENT, "-");
+	lv_obj_align(lbl_gear, LV_ALIGN_CENTER, 0, 10);
+
+	/* ambient (real units) and telltales along the bottom */
+	lbl_ambient = ui_label(p, FONT_XS, COL_DIM, "--.- C");
+	lv_obj_align(lbl_ambient, LV_ALIGN_BOTTOM_LEFT, 10, -8);
+
+	tt_row = lv_obj_create(p);
+	lv_obj_remove_style_all(tt_row);
+	lv_obj_set_size(tt_row, 220, 24);
+	lv_obj_align(tt_row, LV_ALIGN_BOTTOM_MID, 0, -6);
+	lv_obj_set_flex_flow(tt_row, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(tt_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(tt_row, 6, 0);
+	tt_oil = telltale(tt_row, "OIL", COL_ALARM);
+	tt_temp = telltale(tt_row, "TEMP", COL_ALARM);
+	tt_fuel = telltale(tt_row, "FUEL", COL_WARN);
 }
 
 /*
@@ -310,20 +463,33 @@ void ui_update(const struct hbas_vehicle *v)
 	unsigned sp;
 	int amb;
 
-	/* Speed in the bike's own unit setting (0x5C0), mph until it's known */
-	if (v->metric ? hbas_speed_kph_x10(v, &sp) : hbas_speed_mph_x10(v, &sp))
-		lv_label_set_text_fmt(lbl_speed, "%u", (sp + 5) / 10);
-	else
+	/* Speed in the bike's own unit setting (0x5C0), mph until it's known.
+	 * The dial relabels itself when the unit setting first arrives. */
+	if (v->metric != dash_metric) {
+		dash_metric = v->metric;
+		lv_scale_set_range(lv_obj_get_parent(ndl_speed), 0, v->metric ? 200 : 160);
+		lv_scale_set_total_tick_count(lv_obj_get_parent(ndl_speed), v->metric ? 41 : 33);
+		lv_label_set_text(lbl_speed_unit, v->metric ? "km/h" : "mph");
+	}
+	if (v->metric ? hbas_speed_kph_x10(v, &sp) : hbas_speed_mph_x10(v, &sp)) {
+		unsigned mph = (sp + 5) / 10;
+
+		lv_label_set_text_fmt(lbl_speed, "%u", mph);
+		lv_scale_set_line_needle_value(lv_obj_get_parent(ndl_speed), ndl_speed, DIAL_R - 14,
+					       mph);
+	} else {
 		lv_label_set_text(lbl_speed, "--");
-	lv_label_set_text(lbl_speed_unit, v->metric ? "km/h" : "mph");
+	}
 	ui_gps_set_metric(v->metric);
 	ui_map_set_metric(v->metric);
 
 	if (v->seen & HBAS_SEEN_ENG2) {
+		int t = v->rpm > RPM_MAX ? 8 : (v->rpm * 8 + RPM_MAX / 2) / RPM_MAX;
+
 		/* Gear value meanings aren't defined in stock code; show the number. */
 		lv_label_set_text_fmt(lbl_gear, "%u", v->gear_raw);
-		lv_bar_set_value(bar_rpm, v->rpm > RPM_MAX ? RPM_MAX : v->rpm, LV_ANIM_OFF);
-		lv_label_set_text_fmt(lbl_rpm, "%u rpm", v->rpm);
+		lv_label_set_text_fmt(lbl_rpm, "%u", v->rpm);
+		lv_scale_set_line_needle_value(lv_obj_get_parent(ndl_tach), ndl_tach, DIAL_R - 14, t);
 	}
 
 	if (v->seen & HBAS_SEEN_INST2) {
@@ -335,28 +501,12 @@ void ui_update(const struct hbas_vehicle *v)
 	}
 	if (hbas_ambient_c_x10(v, &amb))
 		lv_label_set_text_fmt(lbl_ambient, "%d.%d C", amb / 10, (amb < 0 ? -amb : amb) % 10);
-	lv_label_set_text_fmt(lbl_ign, "KEY %s", hbas_ignition_name(v->ignition));
 
 	ui_audio_update(v);
-	indicator_set(ind_engine, v->engine_running, COL_OK);
-	indicator_set(ind_oil, v->oil_pressure_warning, COL_ALARM);
-	indicator_set(ind_fuel, v->low_fuel, COL_WARN);
-	indicator_set(ind_temp, v->overtemp, COL_ALARM);
-
-	/* Temperature gauges. Raw units are unverified (stock code doesn't
-	 * convert them), so these are relative: the bar tracks the raw value
-	 * and the overtemp telltale (which we do decode) drives the HOT state. */
-	if (v->seen & HBAS_SEEN_ENG2) {
-		ui_gauge_set(&g_engine, v->engine_temp_raw, v->overtemp ? "HOT" : NULL);
-		ui_gauge_set(&g_coolant, v->coolant_temp_raw, v->overtemp ? "HOT" : NULL);
-		if (v->overtemp) {
-			lv_obj_set_style_bg_color(g_engine.fill, COL_ALARM, 0);
-			lv_obj_set_style_bg_color(g_coolant.fill, COL_ALARM, 0);
-		}
-	} else {
-		ui_gauge_set_unknown(&g_engine);
-		ui_gauge_set_unknown(&g_coolant);
-	}
+	/* telltales appear only when active */
+	(v->oil_pressure_warning ? lv_obj_remove_flag : lv_obj_add_flag)(tt_oil, LV_OBJ_FLAG_HIDDEN);
+	(v->overtemp ? lv_obj_remove_flag : lv_obj_add_flag)(tt_temp, LV_OBJ_FLAG_HIDDEN);
+	(v->low_fuel ? lv_obj_remove_flag : lv_obj_add_flag)(tt_fuel, LV_OBJ_FLAG_HIDDEN);
 
 	/* trike: the bike's own TPMS flag, or a trike configuration */
 	if ((((v->seen & HBAS_SEEN_BODY2) && v->tpms.trike) || cfg_trike) != tires_trike)
