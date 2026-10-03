@@ -343,6 +343,7 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		{ 22000, UI_PAGE_INFO, "", "03-info" },
 		{ 22100, UI_PAGE_SETTINGS, "", "04-settings" },
 		{ 22200, UI_PAGE_MEDIA, "", "05-media" },
+		{ 22320, -1, "R", "05b-radio" },
 		{ 22300, UI_PAGE_AUDIO, "", "06-audio" },
 		{ 22400, UI_PAGE_EQ, "", "07-eq" },
 		{ 23000, UI_PAGE_HOME, "", "08-home-warn" },       /* low fuel: FUEL turns amber */

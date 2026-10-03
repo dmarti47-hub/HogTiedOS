@@ -26,6 +26,9 @@ static uint32_t pos_ms_at, pos_base_ms;    /* local clock for the progress bar *
 
 static lv_obj_t *lbl_phone, *lbl_title, *lbl_artist, *lbl_album, *lbl_time, *bar_pos;
 static lv_obj_t *btn[BTN_COUNT], *btn_lbl[BTN_COUNT], *lbl_hint;
+static lv_obj_t *bt_view, *radio_view, *chip_bt, *chip_radio;
+enum { SRC_BT, SRC_RADIO };
+static int source = SRC_BT;
 static lv_obj_t *pair_box, *lbl_pair, *lbl_toast;
 static uint32_t toast_until;
 
@@ -117,6 +120,13 @@ static void refresh(void)
 										: COL_TEXT, 0);
 	}
 
+	lv_obj_set_style_bg_color(chip_bt, source == SRC_BT ? COL_ACCENT : COL_SURFACE, 0);
+	lv_obj_set_style_text_color(lv_obj_get_child(chip_bt, 0),
+				    source == SRC_BT ? COL_BG : COL_DIM, 0);
+	lv_obj_set_style_bg_color(chip_radio, source == SRC_RADIO ? COL_ACCENT : COL_SURFACE, 0);
+	lv_obj_set_style_text_color(lv_obj_get_child(chip_radio, 0),
+				    source == SRC_RADIO ? COL_BG : COL_DIM, 0);
+
 	if (bt.pair_request) {
 		lv_label_set_text_fmt(lbl_pair, "Pair with %s?\n\n%03u %03u\n\n"
 				      "Check the phone shows the same code.\n"
@@ -129,8 +139,69 @@ static void refresh(void)
 	}
 }
 
-void ui_media_build(lv_obj_t *p)
+static void src_cb(lv_event_t *e);
+
+static lv_obj_t *source_chip(lv_obj_t *p, int x, const char *label, int which)
 {
+	lv_obj_t *c = ui_card(p, x, 6, 86, 26);
+	lv_obj_t *l = ui_label(c, FONT_XS, COL_DIM, label);
+
+	lv_obj_center(l);
+	lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(c, src_cb, LV_EVENT_CLICKED, (void *)(intptr_t)which);
+	return c;
+}
+
+static void set_source(int s)
+{
+	source = s;
+	(s == SRC_BT ? lv_obj_remove_flag : lv_obj_add_flag)(bt_view, LV_OBJ_FLAG_HIDDEN);
+	(s == SRC_RADIO ? lv_obj_remove_flag : lv_obj_add_flag)(radio_view, LV_OBJ_FLAG_HIDDEN);
+	refresh();
+}
+
+static void src_cb(lv_event_t *e)
+{
+	set_source((int)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void build_radio(lv_obj_t *parent)
+{
+	lv_obj_t *c = ui_card(parent, 12, 42, 376, 150);
+	lv_obj_t *l;
+
+	l = ui_label(c, FONT_LG, COL_TEXT, "AM / FM Radio");
+	lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 18);
+	l = ui_label(c, FONT_SM, COL_DIM, "Not available yet");
+	lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
+	l = ui_label(c, FONT_XS, COL_DIM,
+		     "No broadcast tuner found in the stock firmware;\n"
+		     "the hardware path is unconfirmed.");
+	lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -14);
+}
+
+void ui_media_build(lv_obj_t *top)
+{
+	lv_obj_t *p;
+
+	/* source selector (Bluetooth / Radio) across the top */
+	chip_bt = source_chip(top, 214, LV_SYMBOL_BLUETOOTH " BT", SRC_BT);
+	chip_radio = source_chip(top, 304, "Radio", SRC_RADIO);
+
+	radio_view = lv_obj_create(top);
+	lv_obj_remove_style_all(radio_view);
+	lv_obj_set_size(radio_view, UI_WIDTH, UI_HEIGHT);
+	lv_obj_remove_flag(radio_view, LV_OBJ_FLAG_SCROLLABLE);
+	build_radio(radio_view);
+	lv_obj_add_flag(radio_view, LV_OBJ_FLAG_HIDDEN);
+
+	bt_view = lv_obj_create(top);
+	lv_obj_remove_style_all(bt_view);
+	lv_obj_set_size(bt_view, UI_WIDTH, UI_HEIGHT);
+	lv_obj_remove_flag(bt_view, LV_OBJ_FLAG_SCROLLABLE);
+	p = bt_view;                        /* the Bluetooth widgets live here */
+
 	lbl_phone = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
 	lv_obj_set_pos(lbl_phone, 12, 34);
 
@@ -256,6 +327,16 @@ static void btn_clicked(lv_event_t *e)
 
 bool ui_media_key(enum ui_key key)
 {
+	if (key == UI_KEY_LEFT) {
+		set_source(SRC_BT);
+		return true;
+	}
+	if (key == UI_KEY_RIGHT) {
+		set_source(SRC_RADIO);
+		return true;
+	}
+	if (source != SRC_BT)
+		return false;
 	switch (key) {
 	case UI_KEY_UP: sel = (sel + BTN_COUNT - 1) % BTN_COUNT; break;
 	case UI_KEY_DOWN: sel = (sel + 1) % BTN_COUNT; break;

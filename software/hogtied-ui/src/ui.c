@@ -115,6 +115,21 @@ static void build_tires(lv_obj_t *p)
 	tires_layout(false);            /* motorcycle until the bike says trike */
 }
 
+static void nav_cb(lv_event_t *e);
+
+/* a small back button (top-left) that goes up one level */
+static lv_obj_t *add_back(lv_obj_t *page, enum ui_page to)
+{
+	lv_obj_t *b = ui_card(page, 6, 6, 42, 28);
+	lv_obj_t *l = ui_label(b, FONT_RG, COL_ACCENT, LV_SYMBOL_LEFT);
+
+	lv_obj_center(l);
+	lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_set_style_bg_color(b, COL_SURFACE_HI, LV_STATE_PRESSED);
+	lv_obj_add_event_cb(b, nav_cb, LV_EVENT_CLICKED, (void *)(intptr_t)to);
+	return b;
+}
+
 /* nav button callback: go to the page passed as user data */
 static void nav_cb(lv_event_t *e)
 {
@@ -140,8 +155,8 @@ static lv_obj_t *nav_button(lv_obj_t *parent, int x, int y, int w, int h, const 
 /* a small status icon tile; recoloured by status_set (gray/yellow/red) */
 static lv_obj_t *status_tile(lv_obj_t *p, int x, int y, const char *label)
 {
-	lv_obj_t *t = ui_card(p, x, y, 60, 54);
-	lv_obj_t *l = ui_label(t, FONT_XS, COL_DIM, label);
+	lv_obj_t *t = ui_card(p, x, y, 44, 38);
+	lv_obj_t *l = ui_label(t, FONT_TINY, COL_DIM, label);
 
 	lv_obj_center(l);
 	lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
@@ -168,7 +183,7 @@ static void build_home(lv_obj_t *p)
 	lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
 
 	/* media box (left) */
-	media = ui_card(p, 6, 6, 264, 152);
+	media = ui_card(p, 6, 6, 264, 150);
 	cap = ui_label(media, FONT_TINY, COL_ACCENT, "NOW PLAYING");
 	lv_obj_set_pos(cap, 12, 10);
 	lbl_home_clock = ui_label(media, FONT_SM, COL_DIM, "--:--");
@@ -183,10 +198,10 @@ static void build_home(lv_obj_t *p)
 	lv_obj_align(lbl_home_src, LV_ALIGN_LEFT_MID, 12, 26);
 
 	/* status icons under the media box */
-	st_temp = status_tile(p, 6, 164, "TEMP");
-	st_tire = status_tile(p, 72, 164, "TIRES");
-	st_fuel = status_tile(p, 138, 164, "FUEL");
-	st_oil = status_tile(p, 204, 164, "OIL");
+	st_temp = status_tile(p, 6, 166, "TEMP");
+	st_tire = status_tile(p, 56, 166, "TIRES");
+	st_fuel = status_tile(p, 106, 166, "FUEL");
+	st_oil = status_tile(p, 156, 166, "OIL");
 
 	/* navigation buttons (vertical, right) */
 	nav_button(p, 278, 6, 116, 52, "Navigation", UI_PAGE_NAV);
@@ -304,7 +319,7 @@ void ui_create(void)
 
 	pages[UI_PAGE_HOME] = page_create(scr, "");
 	pages[UI_PAGE_NAV] = page_create(scr, "");
-	pages[UI_PAGE_MEDIA] = page_create(scr, "PHONE");
+	pages[UI_PAGE_MEDIA] = page_create(scr, "MUSIC");
 	pages[UI_PAGE_INFO] = page_create(scr, "");
 	pages[UI_PAGE_SETTINGS] = page_create(scr, "");
 	pages[UI_PAGE_AUDIO] = page_create(scr, "AUDIO");
@@ -319,6 +334,10 @@ void ui_create(void)
 	ui_eq_build(pages[UI_PAGE_EQ]);
 	/* Equalizer lives inside Audio settings */
 	nav_button(pages[UI_PAGE_AUDIO], 300, 206, 92, 30, "EQ", UI_PAGE_EQ);
+	/* back buttons through the settings hierarchy */
+	add_back(pages[UI_PAGE_SETTINGS], UI_PAGE_HOME);
+	add_back(pages[UI_PAGE_AUDIO], UI_PAGE_SETTINGS);
+	add_back(pages[UI_PAGE_EQ], UI_PAGE_AUDIO);
 
 	lv_obj_add_event_cb(scr, screen_gesture_cb, LV_EVENT_GESTURE, NULL);
 	show_page(UI_PAGE_HOME);
