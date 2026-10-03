@@ -21,6 +21,7 @@
 static lv_obj_t *pages[UI_PAGE_COUNT];
 static lv_obj_t *dots[UI_PAGE_COUNT];
 static enum ui_page page;
+static void show_page(enum ui_page n);
 
 /* Dash */
 static lv_obj_t *lbl_speed, *lbl_speed_unit, *lbl_gear, *bar_rpm, *lbl_rpm;
@@ -192,6 +193,28 @@ static void build_system(lv_obj_t *p)
 	lv_obj_set_pos(lbl_sys, 12, 36);
 }
 
+static void dot_clicked(lv_event_t *e)
+{
+	show_page((enum ui_page)(intptr_t)lv_event_get_user_data(e));
+}
+
+/* Touch: a swipe changes page (or moves up/down within one); taps go to the
+ * clickable controls on each page. The handlebar keys still work. */
+static void screen_gesture_cb(lv_event_t *e)
+{
+	lv_indev_t *indev = lv_event_get_indev(e);
+
+	if (!indev)
+		return;
+	switch (lv_indev_get_gesture_dir(indev)) {
+	case LV_DIR_LEFT: ui_key(UI_KEY_RIGHT); break;   /* swipe left -> next page */
+	case LV_DIR_RIGHT: ui_key(UI_KEY_LEFT); break;
+	case LV_DIR_TOP: ui_key(UI_KEY_DOWN); break;      /* swipe up -> down a list */
+	case LV_DIR_BOTTOM: ui_key(UI_KEY_UP); break;
+	default: break;
+	}
+}
+
 static void show_page(enum ui_page n)
 {
 	page = n;
@@ -236,7 +259,12 @@ void ui_create(void)
 		lv_obj_set_style_radius(dots[i], LV_RADIUS_CIRCLE, 0);
 		lv_obj_set_style_bg_opa(dots[i], LV_OPA_COVER, 0);
 		lv_obj_align(dots[i], LV_ALIGN_TOP_MID, i * 10 - (UI_PAGE_COUNT - 1) * 5 - 10, 12);
+		/* a bigger invisible hit area so a fingertip can land on a 6px dot */
+		lv_obj_set_ext_click_area(dots[i], 8);
+		lv_obj_add_flag(dots[i], LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_add_event_cb(dots[i], dot_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 	}
+	lv_obj_add_event_cb(scr, screen_gesture_cb, LV_EVENT_GESTURE, NULL);
 	show_page(UI_PAGE_DASH);
 }
 

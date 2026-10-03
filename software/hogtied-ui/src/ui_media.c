@@ -21,6 +21,7 @@ enum { BTN_PREV, BTN_PLAY, BTN_NEXT, BTN_PAIR, BTN_COUNT };
 static struct hbas_bt_state bt;
 static void (*send_cmd)(const char *line);
 static int sel = BTN_PLAY;
+static void btn_clicked(lv_event_t *e);
 static uint32_t pos_ms_at, pos_base_ms;    /* local clock for the progress bar */
 
 static lv_obj_t *lbl_phone, *lbl_title, *lbl_artist, *lbl_album, *lbl_time, *bar_pos;
@@ -157,6 +158,8 @@ void ui_media_build(lv_obj_t *p)
 
 		btn[i] = ui_panel(p, 12 + i * 80, 168, w, 40);
 		lv_obj_set_style_border_color(btn[i], COL_ACCENT, 0);
+		lv_obj_add_flag(btn[i], LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_add_event_cb(btn[i], btn_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 		btn_lbl[i] = ui_label(btn[i], &lv_font_montserrat_20, COL_TEXT, "");
 		lv_obj_center(btn_lbl[i]);
 	}
@@ -241,6 +244,12 @@ bool ui_media_pairing_key(enum ui_key key)
 		refresh();
 	}
 	return true;                                /* the box has the keys */
+}
+
+static void btn_clicked(lv_event_t *e)
+{
+	sel = (int)(intptr_t)lv_event_get_user_data(e);
+	ui_media_key(UI_KEY_ENTER);
 }
 
 bool ui_media_key(enum ui_key key)

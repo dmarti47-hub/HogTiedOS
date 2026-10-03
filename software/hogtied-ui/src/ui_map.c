@@ -770,6 +770,21 @@ static void build_items(void)
 		sel = n_items - 1;
 }
 
+static void select_item(void);
+static void show_menu(void);
+
+static void row_clicked(lv_event_t *e)
+{
+	int i = menu_top + (int)(intptr_t)lv_event_get_user_data(e);
+
+	if (!menu_open || i >= n_items)
+		return;
+	sel = i;
+	select_item();
+	if (menu_open)
+		show_menu();
+}
+
 static void show_menu(void)
 {
 	char text[96];
@@ -1091,6 +1106,9 @@ void ui_map_build(lv_obj_t *p)
 	for (int r = 0; r < MENU_ROWS; r++) {
 		menu_rows[r] = ui_label(menu, &lv_font_montserrat_14, COL_TEXT, "");
 		lv_obj_set_size(menu_rows[r], 250, 24);
+		lv_obj_add_flag(menu_rows[r], LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_add_event_cb(menu_rows[r], row_clicked, LV_EVENT_CLICKED,
+				    (void *)(intptr_t)r);
 		lv_obj_set_pos(menu_rows[r], 1, r * 24);
 		lv_obj_set_style_pad_left(menu_rows[r], 6, 0);
 		lv_obj_set_style_pad_top(menu_rows[r], 3, 0);
