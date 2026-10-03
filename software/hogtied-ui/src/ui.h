@@ -41,18 +41,66 @@ unsigned ui_settings_changes(void);
 /* ---- shared between ui.c and ui_audio.c --------------------------------- */
 #include "lvgl.h"
 
-#define COL_BG      lv_color_hex(0x0B0B0D)
-#define COL_PANEL   lv_color_hex(0x1A1B1F)
-#define COL_PANEL_HI lv_color_hex(0x2A2C33)
-#define COL_TEXT    lv_color_hex(0xECECEC)
-#define COL_DIM     lv_color_hex(0x7C7F87)
-#define COL_ACCENT  lv_color_hex(0xFF7A1A)
-#define COL_WARN    lv_color_hex(0xFFC21A)
-#define COL_ALARM   lv_color_hex(0xFF3B30)
-#define COL_OK      lv_color_hex(0x34C759)
+/*
+ * Design system (refreshed): a high-contrast dark theme for a bike in
+ * sunlight. Surfaces step up in lightness (BG < SURFACE < SURFACE_HI);
+ * ACCENT is the Harley orange. Colours are tokens so a restyle is one edit.
+ */
+#define COL_BG       lv_color_hex(0x0A0B0E)   /* screen */
+#define COL_SURFACE  lv_color_hex(0x16181D)   /* cards */
+#define COL_SURFACE_HI lv_color_hex(0x242831) /* raised / selected */
+#define COL_LINE     lv_color_hex(0x2C313B)   /* hairline borders */
+#define COL_TEXT     lv_color_hex(0xF2F4F7)
+#define COL_DIM      lv_color_hex(0x8A909B)   /* secondary text */
+#define COL_ACCENT   lv_color_hex(0xFF7A1A)   /* Harley orange */
+#define COL_ACCENT_DK lv_color_hex(0x7A3A0C)  /* dim orange fill */
+#define COL_WARN     lv_color_hex(0xFFC21A)
+#define COL_ALARM    lv_color_hex(0xFF453A)
+#define COL_OK       lv_color_hex(0x32D74B)
+#define COL_COOL     lv_color_hex(0x3B82F6)   /* cold end of temp gauges */
+#define COL_HOT      lv_color_hex(0xFF453A)   /* hot end */
+/* back-compat alias: old pages said COL_PANEL / COL_PANEL_HI */
+#define COL_PANEL    COL_SURFACE
+#define COL_PANEL_HI COL_SURFACE_HI
+
+/* Type scale */
+#define FONT_HERO   &lv_font_montserrat_48    /* speed */
+#define FONT_XL     &lv_font_montserrat_36
+#define FONT_LG     &lv_font_montserrat_28
+#define FONT_MD     &lv_font_montserrat_24
+#define FONT_RG     &lv_font_montserrat_20
+#define FONT_SM     &lv_font_montserrat_16
+#define FONT_XS     &lv_font_montserrat_14
+#define FONT_TINY   &lv_font_montserrat_12
 
 lv_obj_t *ui_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t col, const char *txt);
 lv_obj_t *ui_panel(lv_obj_t *parent, int x, int y, int w, int h);
+
+/* ---- touch widget toolkit (ui_widgets.c) -------------------------------- */
+
+/* A rounded surface card. */
+lv_obj_t *ui_card(lv_obj_t *parent, int x, int y, int w, int h);
+
+/*
+ * A bar gauge with coloured zones, for temperature / rpm and the like.
+ * Vertical if h > w, else horizontal. Set the value and optional warn/alarm
+ * thresholds; the fill turns amber then red past them.
+ */
+struct ui_gauge {
+	lv_obj_t *bar, *fill, *lbl_val, *lbl_cap;
+	int min, max, warn, alarm;
+	bool vertical;
+};
+void ui_gauge_init(struct ui_gauge *g, lv_obj_t *parent, int x, int y, int w, int h,
+		   const char *caption);
+void ui_gauge_range(struct ui_gauge *g, int min, int max, int warn, int alarm);
+/* value in gauge units; txt is what the number cell shows (NULL hides it). */
+void ui_gauge_set(struct ui_gauge *g, int value, const char *txt);
+void ui_gauge_set_unknown(struct ui_gauge *g);
+
+/* A tap target that calls cb(user) when pressed; returns the card. */
+lv_obj_t *ui_button(lv_obj_t *parent, int x, int y, int w, int h, const char *label,
+		    void (*cb)(void *), void *user);
 
 void ui_audio_build(lv_obj_t *page);
 void ui_audio_update(const struct hbas_vehicle *v);

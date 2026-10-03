@@ -70,10 +70,13 @@ size_t demo_frames(uint32_t t, struct can_frame_lite *out, size_t max)
 	out[n].data[0] = 0x00; out[n].data[1] = 0x98; out[n].data[2] = 0x96; out[n].data[3] = 0x80;
 	out[n++].data[4] = 128;
 
-	frame(&out[n], HBAS_ID_ENGINE_CTRL_DATA2);          /* rpm, speed, gear */
+	frame(&out[n], HBAS_ID_ENGINE_CTRL_DATA2);          /* rpm, speed, gear, temps */
 	put16(&out[n].data[0], rpm);
 	put16(&out[n].data[2], kph_x10);
-	out[n++].data[6] = gear;
+	/* warm-up for the temperature gauges (raw units unverified, demo only) */
+	put16(&out[n].data[4], 60 + (t / 90 > 150 ? 150 : t / 90));
+	out[n].data[6] = gear;
+	out[n++].data[7] = 60 + (t / 110 > 130 ? 130 : t / 110);
 
 	frame(&out[n], HBAS_ID_ENGINE_CTRL_DATA3);          /* engine running after start */
 	out[n++].data[1] = t >= 1500 ? 0x40 : 0x00;

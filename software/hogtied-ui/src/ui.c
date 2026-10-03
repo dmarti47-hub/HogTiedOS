@@ -27,6 +27,7 @@ static void show_page(enum ui_page n);
 static lv_obj_t *lbl_speed, *lbl_speed_unit, *lbl_gear, *bar_rpm, *lbl_rpm;
 static lv_obj_t *lbl_clock, *lbl_ambient, *lbl_ign;
 static lv_obj_t *ind_engine, *ind_oil, *ind_fuel, *ind_temp;
+static struct ui_gauge g_engine, g_coolant;
 /* Tires */
 static lv_obj_t *lbl_tire[HBAS_TIRE_COUNT], *lbl_tpms_state;
 static lv_obj_t *tire_panel[HBAS_TIRE_COUNT], *lbl_tire_name[HBAS_TIRE_COUNT];
@@ -92,51 +93,67 @@ static lv_obj_t *page_create(lv_obj_t *scr, const char *title)
 
 static void build_dash(lv_obj_t *p)
 {
-	lv_obj_t *speed_panel = ui_panel(p, 10, 32, 250, 138);
-	lv_obj_t *gear_panel = ui_panel(p, 270, 32, 120, 138);
-	lv_obj_t *row;
+	lv_obj_t *speed = ui_card(p, 6, 28, 224, 150);
+	lv_obj_t *gear = ui_card(p, 236, 28, 158, 46);
+	lv_obj_t *strip, *cap;
 
-	lbl_speed = ui_label(speed_panel, &lv_font_montserrat_48, COL_TEXT, "--");
-	lv_obj_align(lbl_speed, LV_ALIGN_CENTER, 0, -10);
-	lv_obj_set_style_transform_scale(lbl_speed, 384, 0);     /* 1.5x of 48 px */
+	/* speed, the hero number */
+	lbl_speed = ui_label(speed, FONT_HERO, COL_TEXT, "--");
+	lv_obj_align(lbl_speed, LV_ALIGN_CENTER, 0, -22);
+	lv_obj_set_style_transform_scale(lbl_speed, 486, 0);     /* ~1.9x of 48 px */
 	lv_obj_set_style_transform_pivot_x(lbl_speed, LV_PCT(50), 0);
 	lv_obj_set_style_transform_pivot_y(lbl_speed, LV_PCT(50), 0);
-	lbl_speed_unit = ui_label(speed_panel, &lv_font_montserrat_20, COL_DIM, "mph");
-	lv_obj_align(lbl_speed_unit, LV_ALIGN_BOTTOM_MID, 0, -8);
+	lbl_speed_unit = ui_label(speed, FONT_SM, COL_DIM, "mph");
+	lv_obj_align(lbl_speed_unit, LV_ALIGN_CENTER, 0, 24);
 
-	ui_label(gear_panel, &lv_font_montserrat_14, COL_DIM, "GEAR");
-	lv_obj_align(lv_obj_get_child(gear_panel, 0), LV_ALIGN_TOP_MID, 0, 8);
-	lbl_gear = ui_label(gear_panel, &lv_font_montserrat_48, COL_ACCENT, "-");
-	lv_obj_align(lbl_gear, LV_ALIGN_CENTER, 0, 8);
-	lv_obj_set_style_transform_scale(lbl_gear, 384, 0);
-	lv_obj_set_style_transform_pivot_x(lbl_gear, LV_PCT(50), 0);
-	lv_obj_set_style_transform_pivot_y(lbl_gear, LV_PCT(50), 0);
-
-	bar_rpm = lv_bar_create(p);
-	lv_obj_set_pos(bar_rpm, 10, 178);
-	lv_obj_set_size(bar_rpm, 290, 12);
+	/* rpm bar along the bottom of the speed card */
+	bar_rpm = lv_bar_create(speed);
+	lv_obj_remove_style_all(bar_rpm);
+	lv_obj_set_size(bar_rpm, 200, 6);
+	lv_obj_align(bar_rpm, LV_ALIGN_BOTTOM_MID, 0, -22);
 	lv_bar_set_range(bar_rpm, 0, RPM_MAX);
-	lv_obj_set_style_bg_color(bar_rpm, COL_PANEL, LV_PART_MAIN);
+	lv_obj_set_style_radius(bar_rpm, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+	lv_obj_set_style_radius(bar_rpm, LV_RADIUS_CIRCLE, LV_PART_INDICATOR);
+	lv_obj_set_style_bg_opa(bar_rpm, LV_OPA_COVER, LV_PART_MAIN);
+	lv_obj_set_style_bg_color(bar_rpm, COL_BG, LV_PART_MAIN);
+	lv_obj_set_style_bg_opa(bar_rpm, LV_OPA_COVER, LV_PART_INDICATOR);
 	lv_obj_set_style_bg_color(bar_rpm, COL_ACCENT, LV_PART_INDICATOR);
-	lbl_rpm = ui_label(p, &lv_font_montserrat_14, COL_DIM, "---- rpm");
-	lv_obj_set_pos(lbl_rpm, 310, 176);
+	lbl_rpm = ui_label(speed, FONT_TINY, COL_DIM, "---- rpm");
+	lv_obj_align(lbl_rpm, LV_ALIGN_BOTTOM_MID, 0, -6);
 
-	row = lv_obj_create(p);
-	lv_obj_remove_style_all(row);
-	lv_obj_set_pos(row, 10, 200);
-	lv_obj_set_size(row, 380, 26);
-	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_set_style_pad_column(row, 6, 0);
-	ind_engine = indicator(row, "ENGINE");
-	ind_oil = indicator(row, "OIL");
-	ind_fuel = indicator(row, "FUEL");
-	ind_temp = indicator(row, "HOT");
-	lbl_ign = ui_label(row, &lv_font_montserrat_14, COL_DIM, "KEY --");
-	lbl_ambient = ui_label(row, &lv_font_montserrat_14, COL_TEXT, "--.- C");
+	/* gear */
+	cap = ui_label(gear, FONT_XS, COL_DIM, "GEAR");
+	lv_obj_align(cap, LV_ALIGN_LEFT_MID, 10, 0);
+	lbl_gear = ui_label(gear, FONT_XL, COL_ACCENT, "-");
+	lv_obj_align(lbl_gear, LV_ALIGN_RIGHT_MID, -16, 0);
 
-	lbl_clock = ui_label(p, &lv_font_montserrat_20, COL_TEXT, "--:--");
-	lv_obj_align(lbl_clock, LV_ALIGN_TOP_RIGHT, -12, 4);
+	/* engine and coolant temperature (relative: raw units unverified) */
+	ui_gauge_init(&g_engine, ui_card(p, 236, 80, 158, 46), 10, 6, 138, 34, "ENGINE");
+	ui_gauge_init(&g_coolant, ui_card(p, 236, 132, 158, 46), 10, 6, 138, 34, "COOLANT");
+	/* display spans are placeholders until the raw encoding is read on
+	 * hardware; the HOT state comes from the decoded overtemp telltale */
+	ui_gauge_range(&g_engine, 40, 240, 0, 0);
+	ui_gauge_range(&g_coolant, 40, 220, 0, 0);
+
+	/* warnings + ignition + ambient, along the bottom */
+	strip = lv_obj_create(p);
+	lv_obj_remove_style_all(strip);
+	lv_obj_set_pos(strip, 6, 186);
+	lv_obj_set_size(strip, 388, 30);
+	lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
+	lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_column(strip, 6, 0);
+	ind_engine = indicator(strip, "ENGINE");
+	ind_oil = indicator(strip, "OIL");
+	ind_fuel = indicator(strip, "FUEL");
+	ind_temp = indicator(strip, "HOT");
+	lbl_ign = ui_label(strip, FONT_XS, COL_DIM, "KEY --");
+	lbl_ambient = ui_label(strip, FONT_XS, COL_TEXT, "--.- C");
+
+	/* clock, top right */
+	lbl_clock = ui_label(p, FONT_RG, COL_TEXT, "--:--");
+	lv_obj_align(lbl_clock, LV_ALIGN_TOP_RIGHT, -12, 5);
 }
 
 /*
@@ -325,6 +342,21 @@ void ui_update(const struct hbas_vehicle *v)
 	indicator_set(ind_oil, v->oil_pressure_warning, COL_ALARM);
 	indicator_set(ind_fuel, v->low_fuel, COL_WARN);
 	indicator_set(ind_temp, v->overtemp, COL_ALARM);
+
+	/* Temperature gauges. Raw units are unverified (stock code doesn't
+	 * convert them), so these are relative: the bar tracks the raw value
+	 * and the overtemp telltale (which we do decode) drives the HOT state. */
+	if (v->seen & HBAS_SEEN_ENG2) {
+		ui_gauge_set(&g_engine, v->engine_temp_raw, v->overtemp ? "HOT" : NULL);
+		ui_gauge_set(&g_coolant, v->coolant_temp_raw, v->overtemp ? "HOT" : NULL);
+		if (v->overtemp) {
+			lv_obj_set_style_bg_color(g_engine.fill, COL_ALARM, 0);
+			lv_obj_set_style_bg_color(g_coolant.fill, COL_ALARM, 0);
+		}
+	} else {
+		ui_gauge_set_unknown(&g_engine);
+		ui_gauge_set_unknown(&g_coolant);
+	}
 
 	/* trike: the bike's own TPMS flag, or a trike configuration */
 	if ((((v->seen & HBAS_SEEN_BODY2) && v->tpms.trike) || cfg_trike) != tires_trike)
