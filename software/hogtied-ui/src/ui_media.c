@@ -12,6 +12,10 @@
  * rejects.
  */
 #include "ui.h"
+#include "persist.h"
+
+#include "hbas/settings.h"
+#include "hbas/tunerproto.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -165,20 +169,231 @@ static void src_cb(lv_event_t *e)
 	set_source((int)(intptr_t)lv_event_get_user_data(e));
 }
 
+/* ---- radio (AM/FM/WB via hbas-tunerd) ---------------------------------- */
+
+#define N_PRESET 6
+static struct hbas_tuner_state tuner;
+static void (*tuner_send)(const char *line);
+static lv_obj_t *band_chip[HBAS_BAND_COUNT], *lbl_freq, *lbl_unit, *lbl_rds_ps, *lbl_rds_rt;
+static lv_obj_t *lbl_sig, *preset_btn[N_PRESET], *preset_lbl[N_PRESET];
+static int presets[HBAS_BAND_COUNT][N_PRESET];   /* saved freqs, 0 = empty */
+static const char *presets_path;
+
+static void tuner_cmd_raw(const char *line)
+{
+	if (tuner_send)
+		tuner_send(line);
+}
+
+static void save_presets(void)
+{
+	char buf[512];
+	int off = snprintf(buf, sizeof(buf), "# HogTiedOS radio 1\n");
+
+	for (int b = 0; b < HBAS_BAND_COUNT; b++)
+		for (int i = 0; i < N_PRESET; i++)
+			if (presets[b][i])
+				off += snprintf(buf + off, sizeof(buf) - off, "preset %s %d %d\n",
+						hbas_band_name(b), i, presets[b][i]);
+	if (presets_path)
+		persist_write_file(presets_path, buf);
+}
+
+void ui_tuner_load_presets(const char *path)
+{
+	char buf[512], band[4];
+	int i, freq;
+	const char *line;
+
+	presets_path = path;
+	memset(presets, 0, sizeof(presets));
+	if (!path || hbas_settings_load(path, buf, sizeof(buf)))
+		return;
+	for (line = buf; *line; ) {
+		const char *nl = strchr(line, '\n');
+
+		if (sscanf(line, "preset %3s %d %d", band, &i, &freq) == 3 && i >= 0 && i < N_PRESET)
+			for (int b = 0; b < HBAS_BAND_COUNT; b++)
+				if (!strcmp(band, hbas_band_name(b)))
+					presets[b][i] = freq;
+		line = nl ? nl + 1 : line + strlen(line);
+	}
+}
+
+static void radio_refresh(void)
+{
+	char fs[16], sig[48];
+	const char *unit;
+
+	for (int b = 0; b < HBAS_BAND_COUNT; b++) {
+		bool on = (int)tuner.band == b;
+
+		lv_obj_set_style_bg_color(band_chip[b], on ? COL_ACCENT : COL_SURFACE, 0);
+		lv_obj_set_style_text_color(lv_obj_get_child(band_chip[b], 0), on ? COL_BG : COL_DIM, 0);
+	}
+	hbas_tuner_freq_str(&tuner, fs, sizeof(fs), &unit);
+	lv_label_set_text(lbl_freq, fs);
+	lv_label_set_text(lbl_unit, unit);
+	lv_obj_update_layout(lbl_freq);
+	lv_obj_align_to(lbl_unit, lbl_freq, LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -10);
+	lv_label_set_text(lbl_rds_ps, tuner.ps[0] ? tuner.ps : hbas_band_name(tuner.band));
+	lv_label_set_text(lbl_rds_rt, tuner.rt);
+	if (!tuner.daemon)
+		snprintf(sig, sizeof(sig), "radio service not running");
+	else
+		snprintf(sig, sizeof(sig), "%s   signal %d", tuner.stereo ? "STEREO" : "mono",
+			 tuner.rssi);
+	lv_label_set_text(lbl_sig, sig);
+
+	for (int i = 0; i < N_PRESET; i++) {
+		int f = presets[tuner.band][i];
+
+		if (f) {
+			struct hbas_tuner_state tmp = tuner;
+			char ps[16];
+
+			tmp.freq = f;
+			hbas_tuner_freq_str(&tmp, ps, sizeof(ps), NULL);
+			lv_label_set_text(preset_lbl[i], ps);
+			lv_obj_set_style_text_color(preset_lbl[i], f == tuner.freq ? COL_ACCENT
+						    : COL_TEXT, 0);
+		} else {
+			lv_label_set_text_fmt(preset_lbl[i], "P%d", i + 1);
+			lv_obj_set_style_text_color(preset_lbl[i], COL_DIM, 0);
+		}
+	}
+}
+
+void ui_tuner_apply(const char *line)
+{
+	if (hbas_tuner_apply(&tuner, line))
+		radio_refresh();
+}
+
+void ui_tuner_set_sender(void (*send)(const char *line))
+{
+	tuner_send = send;
+}
+
+static void set_band(enum hbas_band b)
+{
+	char cmd[32];
+
+	hbas_tuner_cmd_band(cmd, sizeof(cmd), b);
+	tuner_cmd_raw(cmd);
+}
+
+static void do_seek(bool up)
+{
+	char cmd[32];
+
+	hbas_tuner_cmd_seek(cmd, sizeof(cmd), up);
+	tuner_cmd_raw(cmd);
+}
+
+static void do_tune(int freq)
+{
+	char cmd[32];
+
+	hbas_tuner_cmd_tune(cmd, sizeof(cmd), freq);
+	tuner_cmd_raw(cmd);
+}
+
+static void band_cb(lv_event_t *e)
+{
+	set_band((enum hbas_band)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void preset_cb(lv_event_t *e)
+{
+	int i = (int)(intptr_t)lv_event_get_user_data(e);
+	bool long_press = lv_event_get_code(e) == LV_EVENT_LONG_PRESSED;
+
+	if (long_press) {
+		presets[tuner.band][i] = tuner.freq;   /* save current station */
+		save_presets();
+		radio_refresh();
+	} else if (presets[tuner.band][i]) {
+		do_tune(presets[tuner.band][i]);       /* recall */
+	}
+}
+
+static void step_cb(lv_event_t *e)
+{
+	int dir = (int)(intptr_t)lv_event_get_user_data(e);
+
+	do_tune(hbas_tuner_step(tuner.band, tuner.freq, dir));
+}
+
+static void seek_cb(lv_event_t *e)
+{
+	do_seek((int)(intptr_t)lv_event_get_user_data(e) > 0);
+}
+
+static lv_obj_t *radio_chip(lv_obj_t *p, int x, int y, int w, const char *lbl,
+			    lv_event_cb_t cb, int data, lv_event_code_t extra)
+{
+	lv_obj_t *c = ui_card(p, x, y, w, 30);
+	lv_obj_t *l = ui_label(c, FONT_SM, COL_TEXT, lbl);
+
+	lv_obj_center(l);
+	lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_set_style_bg_color(c, COL_SURFACE_HI, LV_STATE_PRESSED);
+	lv_obj_add_event_cb(c, cb, LV_EVENT_CLICKED, (void *)(intptr_t)data);
+	if (extra)
+		lv_obj_add_event_cb(c, cb, extra, (void *)(intptr_t)data);
+	return c;
+}
+
 static void build_radio(lv_obj_t *parent)
 {
-	lv_obj_t *c = ui_card(parent, 12, 42, 376, 150);
-	lv_obj_t *l;
+	static const char *const bn[HBAS_BAND_COUNT] = { "FM", "AM", "WB" };
 
-	l = ui_label(c, FONT_LG, COL_TEXT, "AM / FM Radio");
-	lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 18);
-	l = ui_label(c, FONT_SM, COL_DIM, "Not available yet");
-	lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
-	l = ui_label(c, FONT_XS, COL_DIM,
-		     "No broadcast tuner found in the stock firmware;\n"
-		     "the hardware path is unconfirmed.");
-	lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_align(l, LV_ALIGN_BOTTOM_MID, 0, -14);
+	hbas_tuner_state_init(&tuner);
+
+	/* band selector */
+	for (int b = 0; b < HBAS_BAND_COUNT; b++)
+		band_chip[b] = radio_chip(parent, 12 + b * 56, 40, 52, bn[b], band_cb, b, 0);
+
+	/* frequency, big */
+	lbl_freq = ui_label(parent, FONT_HERO, COL_TEXT, "--");
+	lv_obj_align(lbl_freq, LV_ALIGN_TOP_LEFT, 16, 60);
+	lbl_unit = ui_label(parent, FONT_SM, COL_DIM, "MHz");
+
+	lbl_rds_ps = ui_label(parent, FONT_RG, COL_ACCENT, "");
+	lv_obj_align(lbl_rds_ps, LV_ALIGN_TOP_RIGHT, -16, 44);
+	lbl_sig = ui_label(parent, FONT_XS, COL_DIM, "");
+	lv_obj_align(lbl_sig, LV_ALIGN_TOP_RIGHT, -16, 74);
+	lbl_rds_rt = ui_label(parent, FONT_XS, COL_DIM, "");
+	lv_obj_set_width(lbl_rds_rt, 376);
+	lv_label_set_long_mode(lbl_rds_rt, LV_LABEL_LONG_DOT);
+	lv_obj_align(lbl_rds_rt, LV_ALIGN_TOP_LEFT, 12, 118);
+
+	/* tune / seek */
+	radio_chip(parent, 12, 140, 60, LV_SYMBOL_PREV, seek_cb, -1, 0);
+	radio_chip(parent, 76, 140, 52, LV_SYMBOL_LEFT, step_cb, -1, 0);
+	radio_chip(parent, 132, 140, 52, LV_SYMBOL_RIGHT, step_cb, 1, 0);
+	radio_chip(parent, 188, 140, 60, LV_SYMBOL_NEXT, seek_cb, 1, 0);
+
+	/* presets (short tap recall, long press save) */
+	for (int i = 0; i < N_PRESET; i++) {
+		preset_btn[i] = radio_chip(parent, 12 + i * 63, 180, 58, "", preset_cb, i,
+					   LV_EVENT_LONG_PRESSED);
+		preset_lbl[i] = lv_obj_get_child(preset_btn[i], 0);
+	}
+	lv_obj_t *hint = ui_label(parent, FONT_TINY, COL_DIM, "hold a preset to save");
+	lv_obj_align(hint, LV_ALIGN_BOTTOM_RIGHT, -12, -4);
+	radio_refresh();
+}
+
+bool ui_tuner_key(enum ui_key key)
+{
+	switch (key) {
+	case UI_KEY_UP: do_seek(true); return true;
+	case UI_KEY_DOWN: do_seek(false); return true;
+	case UI_KEY_ENTER: set_band((tuner.band + 1) % HBAS_BAND_COUNT); return true;
+	default: return false;
+	}
 }
 
 void ui_media_build(lv_obj_t *top)
@@ -336,7 +551,7 @@ bool ui_media_key(enum ui_key key)
 		return true;
 	}
 	if (source != SRC_BT)
-		return false;
+		return ui_tuner_key(key);
 	switch (key) {
 	case UI_KEY_UP: sel = (sel + BTN_COUNT - 1) % BTN_COUNT; break;
 	case UI_KEY_DOWN: sel = (sel + 1) % BTN_COUNT; break;

@@ -120,6 +120,11 @@ void ui_settings_touch(void);               /* the rider changed a setting */
 /* Home page shows the Bluetooth now-playing at a glance (called from media). */
 void ui_home_now_playing(const char *track, const char *artist, bool connected);
 void ui_media_build(lv_obj_t *page);
+/* Radio (AM/FM/WB) on the Music page, via hbas-tunerd. */
+void ui_tuner_apply(const char *line);        /* a tuner/rds line from the daemon */
+void ui_tuner_set_sender(void (*send)(const char *line));
+void ui_tuner_load_presets(const char *path); /* saved presets file */
+bool ui_tuner_key(enum ui_key key);
 void ui_media_set_sender(void (*send)(const char *line));   /* commands to hbas-btd */
 void ui_media_update(const struct hbas_bt_state *s);
 void ui_media_tick(void);                    /* progress bar, toasts */

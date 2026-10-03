@@ -183,6 +183,23 @@
  * read-only: this EEPROM decides which IFS slot the IPL boots. Nothing in
  * Linux may write it without an explicit, reviewed change.
  */
+/*
+ * [confirmed] Broadcast radio tuner: Silabs Si4763 (AM/FM/WB) on OMAP I2C1
+ * (0x48070000). Stock etc/start_tuner.sh runs
+ *   i2c-omap35xx -a1 -i56 -p0x48070000 --u1   (QNX /dev/i2c1)
+ *   dev-tuner -E /dev/i2c1 -D 0x4763 -i 0x62 -t 1 -D 0x4749 -i 0x11 -t 3 ...
+ * so the Si4763 is at I2C address 0x62 and an Si4749 HD Radio coprocessor is
+ * at 0x11 (HD needs proprietary firmware; out of scope). NA = AM/FM/WB.
+ * [unconfirmed] the tuner reset GPIO, and whether the Si4763 boots its
+ * firmware from an on-board SPI flash or must be loaded by the host.
+ * hbas-tunerd opens this bus directly and drives the chip with the public
+ * Si476x command set once bring-up is confirmed (docs/findings/RADIO.md).
+ */
+&i2c1 {
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
 &i2c3 {
 	clock-frequency = <400000>;	/* [confirmed] -c400 */
 

@@ -98,6 +98,12 @@ if [ -n "$BTD" ]; then
 fi
 "$GPSD" --replay "$ROOT/software/gpsd/demo/ride.nmea" --socket "$RUN/hbas-gps.sock" &
 pids="$pids $!"
+
+# radio (demo stations) for the Music page
+cmake -S "$ROOT/software/tunerd" -B "$ROOT/build/tunerd-pc" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build "$ROOT/build/tunerd-pc" -j"$(nproc)"
+"$ROOT/build/tunerd-pc/hbas-tunerd" --demo --socket "$RUN/hbas-tuner.sock" &
+pids="$pids $!"
 trap 'kill $pids 2>/dev/null' EXIT INT TERM
 # two test destinations for the Map page's menu, the first time only
 PLACES="${XDG_CONFIG_HOME:-$HOME/.config}/hogtied/places.conf"
@@ -108,4 +114,5 @@ if [ -n "$MAP_ARGS" ] && [ ! -f "$PLACES" ]; then
 fi
 echo "Starting hogtied-ui $*  (Left/Right: pages, Esc: back, close window to quit)"
 # shellcheck disable=SC2086 # MAP_ARGS is a list of options
-"$BUILD/hogtied-ui" --bt-socket "$RUN/hbas-bt.sock" --gps-socket "$RUN/hbas-gps.sock" $MAP_ARGS "$@"
+"$BUILD/hogtied-ui" --bt-socket "$RUN/hbas-bt.sock" --gps-socket "$RUN/hbas-gps.sock" \
+	--tuner-socket "$RUN/hbas-tuner.sock" $MAP_ARGS "$@"

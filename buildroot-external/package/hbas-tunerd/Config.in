@@ -1,0 +1,8 @@
+config BR2_PACKAGE_HBAS_TUNERD
+	bool "hbas-tunerd"
+	help
+	  AM/FM/WB broadcast radio for hogtied-ui. Drives the Silabs Si4763
+	  on I2C bus 1 using the public Si476x command set, and serves the
+	  tuner state on /run/hbas/tuner.sock. The on-hardware bring-up
+	  (reset line, firmware load) is still unverified; see
+	  docs/findings/RADIO.md. Sources live in software/tunerd.

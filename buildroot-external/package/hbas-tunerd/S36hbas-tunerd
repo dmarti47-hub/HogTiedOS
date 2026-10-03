@@ -1,0 +1,20 @@
+#!/bin/sh
+# AM/FM/WB radio (Silabs Si4763 on I2C1) for hogtied-ui, on
+# /run/hbas/tuner.sock. The I2C backend still needs on-hardware bring-up
+# (docs/findings/RADIO.md); until then it reports demo stations so the UI
+# works. Flip --demo to --i2c /dev/i2c-1 once the chip is brought up.
+
+case "$1" in
+start)
+	printf "Starting hbas-tunerd: "
+	start-stop-daemon -S -b -m -p /var/run/hbas-tunerd.pid -x /usr/bin/hbas-tunerd -- \
+		--demo && echo OK || echo FAIL
+	;;
+stop)
+	printf "Stopping hbas-tunerd: "
+	start-stop-daemon -K -p /var/run/hbas-tunerd.pid && echo OK || echo FAIL
+	rm -f /var/run/hbas-tunerd.pid
+	;;
+restart) "$0" stop; "$0" start ;;
+*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

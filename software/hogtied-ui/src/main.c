@@ -200,6 +200,18 @@ static void gps_link(bool up)
 
 static struct line_client gps_client = { .fd = -1, .on_line = gps_feed_line, .on_link = gps_link };
 
+/* Radio (Music page) */
+static void tuner_feed_line(const char *line) { ui_tuner_apply(line); }
+static void tuner_link(bool up) { (void)up; }
+static struct line_client tuner_client = { .fd = -1, .on_line = tuner_feed_line,
+					   .on_link = tuner_link };
+
+static void tuner_send(const char *line)
+{
+	if (tuner_client.fd >= 0 && send(tuner_client.fd, line, strlen(line), MSG_NOSIGNAL) < 0)
+		fprintf(stderr, "tuner: send failed: %s\n", strerror(errno));
+}
+
 /* ---- offline snapshot backend ------------------------------------------ */
 
 static uint16_t fb565[UI_WIDTH * UI_HEIGHT];
@@ -344,6 +356,7 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		{ 22100, UI_PAGE_SETTINGS, "", "04-settings" },
 		{ 22200, UI_PAGE_MEDIA, "", "05-media" },
 		{ 22320, -1, "R", "05b-radio" },
+		{ 22340, -1, "", "05c-radio-tuned" },
 		{ 22300, UI_PAGE_AUDIO, "", "06-audio" },
 		{ 22400, UI_PAGE_EQ, "", "07-eq" },
 		{ 23000, UI_PAGE_HOME, "", "08-home-warn" },       /* low fuel: FUEL turns amber */
@@ -373,6 +386,9 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 	gps_feed_line("gps link=1 valid=1 fix=3d quality=1 lat=43.038902 lon=-87.906474 "
 		      "speed=88.5 course=272.0 alt=181.0 used=9 view=12 hdop=0.8 time=1790885730 "
 		      "sats=\"12:47 5:45 25:44 2:41 29:38 15:33 18:29 21:22 31:-1\"");
+	/* demo radio station, as hbas-tunerd would report it */
+	ui_tuner_apply("tuner powered=1 band=FM freq=97500 seeking=0 stereo=1 rssi=60 snr=22");
+	ui_tuner_apply("rds ps=\"KQRS\" rt=\"Steppenwolf - Born to Be Wild\"");
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
 		run_to(script[i].t);
 		if (script[i].go >= 0)
@@ -600,7 +616,7 @@ static lv_display_t *create_display(const char *fbdev, const char *touch)
 
 struct live_opts {
 	const char *fbdev, *replay, *can, *settings, *settings_mount, *bike_file, *bt_socket;
-	const char *gps_socket, *map_dir, *map_style, *map_font, *places, *touch;
+	const char *gps_socket, *map_dir, *map_style, *map_font, *places, *touch, *tuner_socket;
 	bool demo, stdin_keys;
 	int speakers, bike;
 };
@@ -646,14 +662,26 @@ static int run_live(const struct live_opts *o)
 	create_display(o->fbdev, o->touch);
 	ui_set_speaker_count(o->speakers);
 	ui_media_set_sender(bt_send);
+	ui_tuner_set_sender(tuner_send);
 	ui_map_open(o->map_dir, o->map_style, o->map_font);
 	bt_client.path = o->bt_socket;
 	gps_client.path = o->gps_socket;
+	tuner_client.path = o->tuner_socket;
 	if (o->bike >= 0)
 		ui_set_bike(bike = o->bike);
 	if (o->settings)
 		persist_init(o->settings, o->settings_mount);
 	ui_map_places(o->places);
+	{
+		static char radio_cfg[512];
+		const char *slash = o->settings ? strrchr(o->settings, '/') : NULL;
+
+		if (o->settings) {
+			snprintf(radio_cfg, sizeof(radio_cfg), "%.*sradio.conf",
+				 slash ? (int)(slash - o->settings + 1) : 0, o->settings);
+			ui_tuner_load_presets(radio_cfg);
+		}
+	}
 	/* only now connect the audio output, so the first thing it gets is the
 	 * saved settings (no jump from the defaults at power-on) */
 	ui_set_audio_backend(&log_backend);
@@ -671,6 +699,7 @@ static int run_live(const struct live_opts *o)
 		/* hbas-btd / hbas-gpsd may start after us, or restart */
 		lc_poll(&bt_client, now);
 		lc_poll(&gps_client, now);
+		lc_poll(&tuner_client, now);
 		ui_map_tick();
 		ui_media_tick();
 		/* the IOC sends the bike configuration once, at startup */
@@ -710,7 +739,7 @@ static int run_live(const struct live_opts *o)
 	(void)o;
 	(void)open_can; (void)poll_can; (void)parse_line; (void)poll_keys;
 	(void)open_buttons; (void)poll_buttons; (void)read_bike_file; (void)lc_poll;
-	(void)bt_send; (void)gps_client;
+	(void)bt_send; (void)gps_client; (void)tuner_send; (void)tuner_client;
 	fprintf(stderr, "built without a display backend; use --snapshot\n");
 	return 1;
 #endif
@@ -720,8 +749,9 @@ int main(int argc, char **argv)
 {
 	struct live_opts o = { .fbdev = "/dev/fb0", .speakers = 4, .bike = -1,
 				.bike_file = "/run/hbas/bike", .bt_socket = "/run/hbas/bt.sock",
-				.gps_socket = "/run/hbas/gps.sock" };
-	static char default_bt[256], default_gps[256];
+				.gps_socket = "/run/hbas/gps.sock",
+				.tuner_socket = "/run/hbas/tuner.sock" };
+	static char default_bt[256], default_gps[256], default_tuner[256];
 	const char *snap = NULL;
 	static char default_settings[512], default_places[512];
 
@@ -746,6 +776,8 @@ int main(int argc, char **argv)
 			o.bt_socket = argv[++i];
 		else if (!strcmp(argv[i], "--gps-socket") && i + 1 < argc)
 			o.gps_socket = argv[++i];
+		else if (!strcmp(argv[i], "--tuner-socket") && i + 1 < argc)
+			o.tuner_socket = argv[++i];
 		else if (!strcmp(argv[i], "--map-dir") && i + 1 < argc)
 			o.map_dir = argv[++i];
 		else if (!strcmp(argv[i], "--map-style") && i + 1 < argc)
@@ -784,6 +816,11 @@ int main(int argc, char **argv)
 		snprintf(default_gps, sizeof(default_gps), "%s/hbas-gps.sock", getenv("XDG_RUNTIME_DIR"));
 		o.gps_socket = default_gps;
 	}
+	if (!strcmp(o.tuner_socket, "/run/hbas/tuner.sock") && getenv("XDG_RUNTIME_DIR")) {
+		snprintf(default_tuner, sizeof(default_tuner), "%s/hbas-tuner.sock",
+			 getenv("XDG_RUNTIME_DIR"));
+		o.tuner_socket = default_tuner;
+	}
 	/* PC: remember settings in the usual per-user place */
 	if (!o.settings) {
 		const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
@@ -798,6 +835,7 @@ int main(int argc, char **argv)
 	}
 #else
 	(void)default_settings;
+	(void)default_tuner;
 	(void)default_bt;
 	(void)default_gps;
 #endif
