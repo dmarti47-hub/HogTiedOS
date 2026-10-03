@@ -21,8 +21,9 @@ static lv_obj_t *pages[UI_PAGE_COUNT];
 static enum ui_page page;
 static void show_page(enum ui_page n);
 
-/* Home (audio): now-playing glance + nav buttons */
+/* Home (audio): media box + nav buttons + status icons */
 static lv_obj_t *lbl_home_clock, *lbl_home_track, *lbl_home_src;
+static lv_obj_t *st_temp, *st_tire, *st_fuel, *st_oil;
 /* Info: vehicle sensor outputs */
 static lv_obj_t *iv_ign, *iv_gear, *iv_engine, *iv_rpm, *iv_speed, *iv_ambient;
 static lv_obj_t *iv_oil, *iv_fuel, *iv_etemp, *iv_ctemp;
@@ -136,33 +137,62 @@ static lv_obj_t *nav_button(lv_obj_t *parent, int x, int y, int w, int h, const 
 
 /* ---- Home (audio) ------------------------------------------------------- */
 
+/* a small status icon tile; recoloured by status_set (gray/yellow/red) */
+static lv_obj_t *status_tile(lv_obj_t *p, int x, int y, const char *label)
+{
+	lv_obj_t *t = ui_card(p, x, y, 60, 54);
+	lv_obj_t *l = ui_label(t, FONT_XS, COL_DIM, label);
+
+	lv_obj_center(l);
+	lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_style_border_width(t, 2, 0);
+	lv_obj_set_style_border_color(t, COL_DIM, 0);
+	return t;
+}
+
+static void status_set(lv_obj_t *tile, int level)
+{
+	lv_color_t c = level >= 2 ? COL_ALARM : level == 1 ? COL_WARN : COL_DIM;
+
+	lv_obj_set_style_border_color(tile, c, 0);
+	lv_obj_set_style_text_color(lv_obj_get_child(tile, 0), c, 0);
+}
+
 static void build_home(lv_obj_t *p)
 {
-	lv_obj_t *t;
+	lv_obj_t *media, *cap;
 
 	lv_obj_set_style_bg_color(p, lv_color_hex(0x0A0612), 0);
 	lv_obj_set_style_bg_grad_color(p, lv_color_hex(0x1A0A26), 0);
 	lv_obj_set_style_bg_grad_dir(p, LV_GRAD_DIR_VER, 0);
 	lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
 
-	t = ui_label(p, FONT_SM, COL_ACCENT, "HOGTIED");
-	lv_obj_align(t, LV_ALIGN_TOP_LEFT, 12, 8);
-	lbl_home_clock = ui_label(p, FONT_RG, COL_TEXT, "--:--");
-	lv_obj_align(lbl_home_clock, LV_ALIGN_TOP_RIGHT, -12, 6);
-
-	/* now playing, at a glance */
-	lbl_home_track = ui_label(p, FONT_MD, COL_TEXT, "Nothing playing");
-	lv_obj_set_width(lbl_home_track, 376);
+	/* media box (left) */
+	media = ui_card(p, 6, 6, 264, 152);
+	cap = ui_label(media, FONT_TINY, COL_ACCENT, "NOW PLAYING");
+	lv_obj_set_pos(cap, 12, 10);
+	lbl_home_clock = ui_label(media, FONT_SM, COL_DIM, "--:--");
+	lv_obj_align(lbl_home_clock, LV_ALIGN_TOP_RIGHT, -12, 8);
+	lbl_home_track = ui_label(media, FONT_LG, COL_TEXT, "Nothing playing");
+	lv_obj_set_width(lbl_home_track, 240);
 	lv_label_set_long_mode(lbl_home_track, LV_LABEL_LONG_DOT);
-	lv_obj_align(lbl_home_track, LV_ALIGN_TOP_LEFT, 12, 34);
-	lbl_home_src = ui_label(p, FONT_XS, COL_DIM, "");
-	lv_obj_align(lbl_home_src, LV_ALIGN_TOP_LEFT, 12, 60);
+	lv_obj_align(lbl_home_track, LV_ALIGN_LEFT_MID, 12, -6);
+	lbl_home_src = ui_label(media, FONT_SM, COL_DIM, "");
+	lv_obj_set_width(lbl_home_src, 240);
+	lv_label_set_long_mode(lbl_home_src, LV_LABEL_LONG_DOT);
+	lv_obj_align(lbl_home_src, LV_ALIGN_LEFT_MID, 12, 26);
 
-	/* navigation tiles (2 x 2) */
-	nav_button(p, 8, 84, 186, 70, "Navigation", UI_PAGE_NAV);
-	nav_button(p, 206, 84, 186, 70, "Phone", UI_PAGE_MEDIA);
-	nav_button(p, 8, 162, 186, 70, "Info", UI_PAGE_INFO);
-	nav_button(p, 206, 162, 186, 70, "Settings", UI_PAGE_SETTINGS);
+	/* status icons under the media box */
+	st_temp = status_tile(p, 6, 164, "TEMP");
+	st_tire = status_tile(p, 72, 164, "TIRES");
+	st_fuel = status_tile(p, 138, 164, "FUEL");
+	st_oil = status_tile(p, 204, 164, "OIL");
+
+	/* navigation buttons (vertical, right) */
+	nav_button(p, 278, 6, 116, 52, "Navigation", UI_PAGE_NAV);
+	nav_button(p, 278, 64, 116, 52, "Music", UI_PAGE_MEDIA);
+	nav_button(p, 278, 122, 116, 52, "Info", UI_PAGE_INFO);
+	nav_button(p, 278, 180, 116, 52, "Settings", UI_PAGE_SETTINGS);
 }
 
 /* ---- Info (sensor outputs) ---------------------------------------------- */
@@ -241,14 +271,6 @@ static void build_settings(lv_obj_t *p)
 
 /* ---- navigation / chrome ----------------------------------------------- */
 
-static lv_obj_t *home_btn;
-
-static void home_cb(void *u)
-{
-	(void)u;
-	show_page(UI_PAGE_HOME);
-}
-
 /* Touch: swipe right returns to Home (like the bezel/handlebar Home button);
  * swipe up/down scroll a list. Handlebar keys still work. */
 static void screen_gesture_cb(lv_event_t *e)
@@ -270,15 +292,11 @@ static void show_page(enum ui_page n)
 	page = n;
 	for (int i = 0; i < UI_PAGE_COUNT; i++)
 		(i == (int)n ? lv_obj_remove_flag : lv_obj_add_flag)(pages[i], LV_OBJ_FLAG_HIDDEN);
-	/* the Home button overlays every page except Home itself */
-	(n == UI_PAGE_HOME ? lv_obj_add_flag : lv_obj_remove_flag)(home_btn, LV_OBJ_FLAG_HIDDEN);
-	lv_obj_move_foreground(home_btn);
 }
 
 void ui_create(void)
 {
 	lv_obj_t *scr = lv_screen_active();
-	lv_obj_t *l;
 
 	lv_obj_set_style_bg_color(scr, COL_BG, 0);
 	lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
@@ -301,12 +319,6 @@ void ui_create(void)
 	ui_eq_build(pages[UI_PAGE_EQ]);
 	/* Equalizer lives inside Audio settings */
 	nav_button(pages[UI_PAGE_AUDIO], 300, 206, 92, 30, "EQ", UI_PAGE_EQ);
-
-	/* floating Home button (mirrors the bezel / handlebar Home) */
-	home_btn = ui_button(lv_layer_top(), 6, 6, 44, 28, LV_SYMBOL_HOME, home_cb, NULL);
-	l = lv_obj_get_child(home_btn, 0);
-	lv_obj_set_style_text_color(l, COL_ACCENT, 0);
-	lv_obj_set_style_bg_opa(home_btn, LV_OPA_70, 0);
 
 	lv_obj_add_event_cb(scr, screen_gesture_cb, LV_EVENT_GESTURE, NULL);
 	show_page(UI_PAGE_HOME);
@@ -379,6 +391,24 @@ void ui_update(const struct hbas_vehicle *v)
 		 v->oil_pressure_warning ? " LOW" : "");
 	set_val(iv_oil, tmp, v->oil_pressure_warning);
 	set_val(iv_fuel, v->low_fuel ? "LOW" : "ok", v->low_fuel);
+
+	/* ---- Home page: status icons (gray normal, yellow warn, red alarm) ---- */
+	{
+		int tire = 0;
+
+		for (int i = 0; i < HBAS_TIRE_COUNT; i++) {
+			if (v->tpms.low_pressure[i])
+				tire = 2;
+			else if (tire < 1 && v->tpms.low_battery[i])
+				tire = 1;
+		}
+		if (tire < 1 && v->tpms.telltale)
+			tire = 1;
+		status_set(st_temp, v->overtemp ? 2 : 0);
+		status_set(st_tire, tire);
+		status_set(st_fuel, v->low_fuel ? 1 : 0);
+		status_set(st_oil, v->oil_pressure_warning ? 2 : 0);
+	}
 
 	/* ---- Home page: clock + now playing ---- */
 	if (v->seen & HBAS_SEEN_INST2) {

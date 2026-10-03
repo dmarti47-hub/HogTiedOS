@@ -345,6 +345,7 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		{ 22200, UI_PAGE_MEDIA, "", "05-media" },
 		{ 22300, UI_PAGE_AUDIO, "", "06-audio" },
 		{ 22400, UI_PAGE_EQ, "", "07-eq" },
+		{ 23000, UI_PAGE_HOME, "", "08-home-warn" },       /* low fuel: FUEL turns amber */
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
 	char path[512];
