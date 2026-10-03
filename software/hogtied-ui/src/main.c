@@ -335,36 +335,16 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 {
 	static uint16_t buf[UI_WIDTH * UI_HEIGHT];
 	/* keys: L/R/U/D = arrows, E = enter, B = back */
-	static const struct { uint32_t t; const char *keys; const char *name; } script[] = {
-		{ 500, "", "01-key-on" },
-		{ 11000, "", "02-accelerating" },
-		{ 22000, "", "03-cruise-low-fuel" },
-		{ 22020, "R", "03a-map" },
-		{ 22025, "E", "03a1-map-menu" },                  /* find, test places */
-		{ 22030, "DDEE", "03a2-map-route" },               /* Devil's Lake -> Go */
-		{ 22035, "EDE", "03a3-map-find" },                 /* Find address, "madi" */
-		{ 22040, "UUUE", "03a4-map-result" },              /* first suggestion */
-		{ 22045, "BDDE", "03a5-map-place" },               /* H-D Museum's menu */
-		{ 22050, "BB", "03a6-map-reroute" },               /* bike leaves the route */
-		{ 22055, "R", "03b-media" },                       /* demo phone playing */
-		{ 22100, "R", "04-audio" },
-		{ 22200, "DERRR", "05-audio-fade-adjust" },        /* fade 3 steps front */
-		{ 22300, "EDER", "06-audio-custom-system" },       /* output -> custom system */
-		{ 22350, "EDER", "06b-audio-driver-headset" },     /* headset -> driver, fade hides */
-		{ 22400, "ER", "07-eq-flat" },
-		{ 22450, "D", "07b-eq-harley" },                   /* Harley tone for the demo FLTR */
-		{ 22500, "DDD", "08-eq-preset-highway" },          /* Harley -> Bass -> Vocal -> Highway */
-		{ 22600, "ERRRUUU", "09-eq-adjust-1k" },           /* 1 kHz band +3 -> Custom */
-		{ 22700, "ER", "10-tires" },
-		{ 22750, "R", "10b-gps" },                         /* demo fix */
-		{ 22800, "R", "11-system" },
-		{ 22900, "B", "12-back-to-dash" },
-		/* same bike reporting itself as a trike: third tire appears */
-		{ 23000, "RRRRR", "13-tires-trike" },
-		/* 2-speaker bike, back on speakers: no fade row */
-		{ 23100, "BRRRUELEDELE", "14-audio-2-speakers" },  /* stock, headset off: no fade on 2 speakers */
-		{ 23150, "DERE", "14b-audio-speed-volume" },       /* speed volume on at demo speed */
-		{ 23200, "RD", "15-eq-harley-speakers" },          /* EQ page, Custom -> Harley */
+	static const struct { uint32_t t; int go; const char *keys; const char *name; } script[] = {
+		{ 2000, UI_PAGE_HOME, "", "01-home" },
+		{ 11000, UI_PAGE_NAV, "", "02-nav" },
+		{ 11050, -1, "E", "02a-nav-menu" },               /* open the map menu */
+		{ 11060, -1, "DDEE", "02b-nav-route" },            /* Devil's Lake -> Go */
+		{ 22000, UI_PAGE_INFO, "", "03-info" },
+		{ 22100, UI_PAGE_SETTINGS, "", "04-settings" },
+		{ 22200, UI_PAGE_MEDIA, "", "05-media" },
+		{ 22300, UI_PAGE_AUDIO, "", "06-audio" },
+		{ 22400, UI_PAGE_EQ, "", "07-eq" },
 	};
 	lv_display_t *d = lv_display_create(UI_WIDTH, UI_HEIGHT);
 	char path[512];
@@ -392,21 +372,11 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		      "speed=88.5 course=272.0 alt=181.0 used=9 view=12 hdop=0.8 time=1790885730 "
 		      "sats=\"12:47 5:45 25:44 2:41 29:38 15:33 18:29 21:22 31:-1\"");
 	for (size_t i = 0; i < sizeof(script) / sizeof(script[0]); i++) {
-		if (!strcmp(script[i].name, "13-tires-trike"))
-			demo_set_trike(1);
-		if (!strcmp(script[i].name, "14-audio-2-speakers"))
-			ui_set_speaker_count(2);
 		run_to(script[i].t);
+		if (script[i].go >= 0)
+			ui_goto((enum ui_page)script[i].go);
 		press_keys(script[i].keys);
-		if (!strcmp(script[i].name, "03a3-map-find"))
-			ui_kbd_type("madi");
-		if (!strcmp(script[i].name, "03a6-map-reroute"))
-			/* three fixes ~400 m north of the route's start */
-			for (int k = 0; k < 3; k++)
-				gps_feed_line("gps link=1 valid=1 fix=3d quality=1 lat=43.042500 "
-					      "lon=-87.906474 speed=40.0 course=0.0 alt=181.0 used=9 "
-					      "view=12 hdop=0.8 time=1790885740");
-		if (!strncmp(script[i].name, "03a", 3))
+		if (!strncmp(script[i].name, "02", 2))
 			/* the map draws (and routes) on its own thread: give it
 			 * time (real time) */
 			for (int ms = 0; ms < 8000 && !(ui_map_has_frame() && ui_map_idle());

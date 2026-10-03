@@ -13,13 +13,19 @@
 /* Navigation keys: handlebars (via hbas-iocd), PC arrow keys, or stdin. */
 enum ui_key { UI_KEY_LEFT, UI_KEY_RIGHT, UI_KEY_UP, UI_KEY_DOWN, UI_KEY_ENTER, UI_KEY_BACK };
 
-enum ui_page { UI_PAGE_DASH, UI_PAGE_MAP, UI_PAGE_MEDIA, UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_TIRES, UI_PAGE_GPS,
-	       UI_PAGE_SYSTEM, UI_PAGE_COUNT };
+/*
+ * Pages. HOME is the audio home (where the bezel/handlebar Home button
+ * returns to); the others are reached by on-screen buttons. Speed and rpm
+ * live on the bike's own gauges, not here.
+ */
+enum ui_page { UI_PAGE_HOME, UI_PAGE_NAV, UI_PAGE_MEDIA, UI_PAGE_INFO, UI_PAGE_SETTINGS,
+	       UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_COUNT };
 
 void ui_create(void);
 void ui_update(const struct hbas_vehicle *v);
 void ui_key(enum ui_key key);
 enum ui_page ui_current_page(void);
+void ui_goto(enum ui_page page);              /* direct navigation (tests/snapshots) */
 
 /* Audio: where settings go (NULL = nowhere), and bike facts that shape it. */
 void ui_set_audio_backend(const struct hbas_audio_backend *b);
@@ -111,6 +117,8 @@ void ui_set_bike_config(int cfg);           /* audio part of ui_set_bike() */
 void ui_settings_touch(void);               /* the rider changed a setting */
 
 /* Media page: phone music over Bluetooth via hbas-btd (btproto.h). */
+/* Home page shows the Bluetooth now-playing at a glance (called from media). */
+void ui_home_now_playing(const char *track, const char *artist, bool connected);
 void ui_media_build(lv_obj_t *page);
 void ui_media_set_sender(void (*send)(const char *line));   /* commands to hbas-btd */
 void ui_media_update(const struct hbas_bt_state *s);

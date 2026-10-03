@@ -95,7 +95,9 @@ static void refresh(void)
 		lv_label_set_text(lbl_title, bt.title);
 		lv_label_set_text(lbl_artist, bt.artist);
 		lv_label_set_text(lbl_album, bt.album);
+		ui_home_now_playing(bt.title, bt.artist, bt.connected);
 	} else {
+		ui_home_now_playing(NULL, NULL, bt.connected);
 		lv_label_set_text(lbl_title, bt.connected ? "Nothing playing" : "");
 		lv_label_set_text(lbl_artist, bt.connected && !bt.player
 					      ? "Phone has no music controls" : "");
