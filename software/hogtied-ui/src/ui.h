@@ -19,7 +19,7 @@ enum ui_key { UI_KEY_LEFT, UI_KEY_RIGHT, UI_KEY_UP, UI_KEY_DOWN, UI_KEY_ENTER, U
  * live on the bike's own gauges, not here.
  */
 enum ui_page { UI_PAGE_HOME, UI_PAGE_NAV, UI_PAGE_MEDIA, UI_PAGE_INFO, UI_PAGE_SETTINGS,
-	       UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_COUNT };
+	       UI_PAGE_AUDIO, UI_PAGE_EQ, UI_PAGE_BLUETOOTH, UI_PAGE_COUNT };
 
 void ui_create(void);
 void ui_update(const struct hbas_vehicle *v);
@@ -125,6 +125,10 @@ void ui_tuner_apply(const char *line);        /* a tuner/rds line from the daemo
 void ui_tuner_set_sender(void (*send)(const char *line));
 void ui_tuner_load_presets(const char *path); /* saved presets file */
 bool ui_tuner_key(enum ui_key key);
+
+/* Bluetooth settings page (phone connection), via hbas-btd. */
+void ui_bt_build(lv_obj_t *page);
+bool ui_bt_key(enum ui_key key);
 void ui_media_set_sender(void (*send)(const char *line));   /* commands to hbas-btd */
 void ui_media_update(const struct hbas_bt_state *s);
 void ui_media_tick(void);                    /* progress bar, toasts */

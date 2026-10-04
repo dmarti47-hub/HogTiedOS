@@ -400,6 +400,32 @@ static void set_pairable(bool on)
 	set_prop(a->path, IF_ADAPTER, "Discoverable", DBUS_TYPE_BOOLEAN, &b);
 }
 
+static void set_powered(bool on)
+{
+	struct obj *a = first(is_adapter);
+	dbus_bool_t b = on;
+
+	if (a)
+		set_prop(a->path, IF_ADAPTER, "Powered", DBUS_TYPE_BOOLEAN, &b);
+}
+
+/* Forget a paired phone: RemoveDevice(objpath) on the adapter. */
+static void remove_device(const char *dev_path)
+{
+	struct obj *a = first(is_adapter);
+	DBusMessage *m;
+
+	if (!a || !dev_path)
+		return;
+	m = dbus_message_new_method_call(BLUEZ, a->path, IF_ADAPTER, "RemoveDevice");
+	if (!m)
+		return;
+	dbus_message_append_args(m, DBUS_TYPE_OBJECT_PATH, &dev_path, DBUS_TYPE_INVALID);
+	dbus_message_set_no_reply(m, TRUE);
+	dbus_connection_send(bus, m, NULL);
+	dbus_message_unref(m);
+}
+
 /* Full resync: GetManagedObjects (at start and when bluetoothd restarts). */
 static void resync(void)
 {
@@ -710,10 +736,22 @@ static void handle_command(const char *line)
 		else
 			logmsg("pairable: ignored, not the pairing agent (pair from the PC's settings)");
 	}
+	else if (!strcmp(m.verb, "power")) {
+		if (agent_enabled)
+			set_powered(!strcmp(arg, "on"));
+		else
+			logmsg("power: ignored, not the pairing agent (use the PC's settings)");
+	}
 	else if (!strcmp(m.verb, "confirm"))
 		answer_pending(!strcmp(arg, "yes"));
 	else if (!strcmp(m.verb, "disconnect") && d)
 		call_noreply(d->path, IF_DEVICE, "Disconnect");
+	else if (!strcmp(m.verb, "forget") && d) {
+		if (agent_enabled)
+			remove_device(d->path);
+		else
+			logmsg("forget: ignored, not the pairing agent");
+	}
 }
 
 static int listen_socket(const char *path)

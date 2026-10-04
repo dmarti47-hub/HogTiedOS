@@ -276,9 +276,8 @@ static void build_settings(lv_obj_t *p)
 	lv_obj_align(cap, LV_ALIGN_TOP_LEFT, 58, 8);
 
 	nav_button(p, 8, 46, 186, 54, "Audio & EQ", UI_PAGE_AUDIO);
-	/* placeholders until implemented */
-	ui_button(p, 206, 46, 186, 54, "Bluetooth", NULL, NULL);
-	ui_button(p, 8, 108, 186, 54, "Theme", NULL, NULL);
+	nav_button(p, 206, 46, 186, 54, "Bluetooth", UI_PAGE_BLUETOOTH);
+	ui_button(p, 8, 108, 186, 54, "Theme", NULL, NULL);   /* placeholder */
 
 	lbl_sys = ui_label(p, FONT_TINY, COL_DIM, "");
 	lv_obj_align(lbl_sys, LV_ALIGN_BOTTOM_LEFT, 12, -8);
@@ -324,6 +323,7 @@ void ui_create(void)
 	pages[UI_PAGE_SETTINGS] = page_create(scr, "");
 	pages[UI_PAGE_AUDIO] = page_create(scr, "AUDIO");
 	pages[UI_PAGE_EQ] = page_create(scr, "EQ");
+	pages[UI_PAGE_BLUETOOTH] = page_create(scr, "BLUETOOTH");
 
 	build_home(pages[UI_PAGE_HOME]);
 	ui_map_build(pages[UI_PAGE_NAV]);
@@ -332,12 +332,14 @@ void ui_create(void)
 	build_settings(pages[UI_PAGE_SETTINGS]);
 	ui_audio_build(pages[UI_PAGE_AUDIO]);
 	ui_eq_build(pages[UI_PAGE_EQ]);
+	ui_bt_build(pages[UI_PAGE_BLUETOOTH]);
 	/* Equalizer lives inside Audio settings */
 	nav_button(pages[UI_PAGE_AUDIO], 300, 206, 92, 30, "EQ", UI_PAGE_EQ);
 	/* back buttons through the settings hierarchy */
 	add_back(pages[UI_PAGE_SETTINGS], UI_PAGE_HOME);
 	add_back(pages[UI_PAGE_AUDIO], UI_PAGE_SETTINGS);
 	add_back(pages[UI_PAGE_EQ], UI_PAGE_AUDIO);
+	add_back(pages[UI_PAGE_BLUETOOTH], UI_PAGE_SETTINGS);
 
 	lv_obj_add_event_cb(scr, screen_gesture_cb, LV_EVENT_GESTURE, NULL);
 	show_page(UI_PAGE_HOME);
@@ -489,6 +491,8 @@ void ui_key(enum ui_key key)
 	if (page == UI_PAGE_AUDIO && ui_audio_key(key))
 		return;
 	if (page == UI_PAGE_EQ && ui_eq_key(key))
+		return;
+	if (page == UI_PAGE_BLUETOOTH && ui_bt_key(key))
 		return;
 	/* the bezel / handlebar Home button returns to the Home page */
 	if (key == UI_KEY_BACK)

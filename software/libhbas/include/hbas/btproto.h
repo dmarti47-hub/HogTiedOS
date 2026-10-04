@@ -16,8 +16,10 @@
  * UI -> daemon
  *   play | pause | next | previous | stop
  *   pairable on|off                          (visible + pairable for a while)
+ *   power on|off                             (adapter power; unit only)
  *   confirm yes|no                           (answer to "pair")
  *   disconnect
+ *   forget                                   (remove/unpair the phone; unit only)
  */
 #ifndef HBAS_BTPROTO_H
 #define HBAS_BTPROTO_H

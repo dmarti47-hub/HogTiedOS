@@ -26,6 +26,7 @@ static struct hbas_bt_state bt;
 static void (*send_cmd)(const char *line);
 static int sel = BTN_PLAY;
 static void btn_clicked(lv_event_t *e);
+static void bt_refresh(void);
 static uint32_t pos_ms_at, pos_base_ms;    /* local clock for the progress bar */
 
 static lv_obj_t *lbl_phone, *lbl_title, *lbl_artist, *lbl_album, *lbl_time, *bar_pos;
@@ -111,6 +112,7 @@ static void refresh(void)
 		lv_label_set_text(lbl_album, "");
 	}
 	refresh_progress();
+	bt_refresh();
 
 	for (int i = 0; i < BTN_COUNT; i++) {
 		bool hi = i == sel;
@@ -474,6 +476,115 @@ void ui_media_build(lv_obj_t *top)
 
 	hbas_bt_state_init(&bt);
 	refresh();
+}
+
+/* ---- Bluetooth settings page (phone connection) ------------------------ */
+
+enum { BT_POWER, BT_PAIR, BT_DISCONNECT, BT_FORGET, BT_ACTIONS };
+static lv_obj_t *bt_rows[BT_ACTIONS], *bt_row_lbl[BT_ACTIONS], *bt_status, *bt_note;
+static int bt_sel;
+
+static void bt_refresh(void)
+{
+	char buf[160];
+	bool can[BT_ACTIONS];
+
+	if (!bt_status)
+		return;
+	can[BT_POWER] = bt.daemon;
+	can[BT_PAIR] = bt.daemon && bt.agent;
+	can[BT_DISCONNECT] = bt.connected;
+	can[BT_FORGET] = bt.connected;
+
+	lv_label_set_text(bt_row_lbl[BT_POWER], bt.powered ? "Bluetooth: On" : "Bluetooth: Off");
+	lv_label_set_text(bt_row_lbl[BT_PAIR], bt.pairable ? "Visible - pairing..." : "Pair a phone");
+	if (bt.connected)
+		snprintf(buf, sizeof(buf), "Disconnect %s", bt.device[0] ? bt.device : "phone");
+	else
+		snprintf(buf, sizeof(buf), "Disconnect");
+	lv_label_set_text(bt_row_lbl[BT_DISCONNECT], buf);
+	lv_label_set_text(bt_row_lbl[BT_FORGET], "Forget this phone");
+
+	for (int i = 0; i < BT_ACTIONS; i++) {
+		bool on = i == bt_sel;
+
+		lv_obj_set_style_bg_opa(bt_rows[i], on ? LV_OPA_COVER : LV_OPA_40, 0);
+		lv_obj_set_style_bg_color(bt_rows[i], on ? COL_SURFACE_HI : COL_SURFACE, 0);
+		lv_obj_set_style_border_width(bt_rows[i], on ? 2 : 1, 0);
+		lv_obj_set_style_border_color(bt_rows[i], on ? COL_ACCENT : COL_LINE, 0);
+		lv_obj_set_style_text_color(bt_row_lbl[i], can[i] ? COL_TEXT : COL_DIM, 0);
+	}
+
+	if (!bt.daemon)
+		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " Bluetooth service not running");
+	else if (!bt.powered)
+		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " Bluetooth is off");
+	else if (bt.connected)
+		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " Connected: %s",
+			 bt.device[0] ? bt.device : "phone");
+	else if (bt.pairable)
+		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " Visible - pair from your phone now");
+	else
+		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " No phone connected");
+	lv_label_set_text(bt_status, buf);
+
+	/* on a PC the desktop owns the adapter; the daemon ignores power/pair */
+	(bt.daemon && !bt.agent ? lv_obj_remove_flag : lv_obj_add_flag)(bt_note,
+									LV_OBJ_FLAG_HIDDEN);
+}
+
+static void bt_activate(int i)
+{
+	switch (i) {
+	case BT_POWER: cmd(bt.powered ? "power off\n" : "power on\n"); break;
+	case BT_PAIR: cmd("pairable on\n"); break;
+	case BT_DISCONNECT: if (bt.connected) cmd("disconnect\n"); break;
+	case BT_FORGET: if (bt.connected) cmd("forget\n"); break;
+	}
+}
+
+static void bt_row_clicked(lv_event_t *e)
+{
+	bt_sel = (int)(intptr_t)lv_event_get_user_data(e);
+	bt_activate(bt_sel);
+	bt_refresh();
+}
+
+void ui_bt_build(lv_obj_t *p)
+{
+	static const char *const labels[BT_ACTIONS] = {
+		"Bluetooth", "Pair a phone", "Disconnect", "Forget this phone",
+	};
+
+	bt_status = ui_label(p, FONT_SM, COL_DIM, "");
+	lv_obj_set_pos(bt_status, 12, 40);
+
+	for (int i = 0; i < BT_ACTIONS; i++) {
+		lv_obj_t *c = ui_card(p, 12, 66 + i * 40, 376, 34);
+
+		lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_add_event_cb(c, bt_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		bt_row_lbl[i] = ui_label(c, FONT_SM, COL_TEXT, labels[i]);
+		lv_obj_align(bt_row_lbl[i], LV_ALIGN_LEFT_MID, 12, 0);
+		bt_rows[i] = c;
+	}
+	bt_note = ui_label(p, FONT_TINY, COL_DIM,
+			   "On this PC, manage pairing in the system Bluetooth settings.");
+	lv_obj_align(bt_note, LV_ALIGN_BOTTOM_LEFT, 12, -6);
+	lv_obj_add_flag(bt_note, LV_OBJ_FLAG_HIDDEN);
+	bt_refresh();
+}
+
+bool ui_bt_key(enum ui_key key)
+{
+	switch (key) {
+	case UI_KEY_UP: bt_sel = (bt_sel + BT_ACTIONS - 1) % BT_ACTIONS; break;
+	case UI_KEY_DOWN: bt_sel = (bt_sel + 1) % BT_ACTIONS; break;
+	case UI_KEY_ENTER: bt_activate(bt_sel); break;
+	default: return false;
+	}
+	bt_refresh();
+	return true;
 }
 
 void ui_media_set_sender(void (*send)(const char *line))

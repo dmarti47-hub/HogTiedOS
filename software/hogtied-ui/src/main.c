@@ -354,6 +354,7 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		{ 11060, -1, "DDEE", "02b-nav-route" },            /* Devil's Lake -> Go */
 		{ 22000, UI_PAGE_INFO, "", "03-info" },
 		{ 22100, UI_PAGE_SETTINGS, "", "04-settings" },
+		{ 22150, UI_PAGE_BLUETOOTH, "", "04b-bluetooth" },
 		{ 22200, UI_PAGE_MEDIA, "", "05-media" },
 		{ 22320, -1, "R", "05b-radio" },
 		{ 22340, -1, "", "05c-radio-tuned" },
