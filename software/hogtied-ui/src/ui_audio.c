@@ -48,7 +48,7 @@ static unsigned changes;
 
 static lv_obj_t *row[HBAS_AI_COUNT], *row_name[HBAS_AI_COUNT];
 static lv_obj_t *row_bar[HBAS_AI_COUNT], *row_val[HBAS_AI_COUNT];
-static lv_obj_t *lbl_eq, *lbl_dsp, *lbl_hint;
+static lv_obj_t *lbl_hint;
 
 static bool row_visible(int r)
 {
@@ -97,7 +97,6 @@ static void refresh(void)
 	struct hbas_audio_db db;
 	enum hbas_audio_output out = hbas_audio_output(&audio);
 	int y = ROW_Y0;
-	char eq[48];
 
 	for (int r = 0; r < HBAS_AI_COUNT; r++) {
 		bool vis = row_visible(r), hi = r == sel;
@@ -139,14 +138,6 @@ static void refresh(void)
 		lv_label_set_text_fmt(row_val[HBAS_AI_SPEED_VOLUME], "On  (+%d dB now)",
 				      audio.speed_boost_db);
 
-	hbas_audio_factory_eq(eq, sizeof(eq), &audio, bike_cfg, engine_running);
-	if (!strcmp(eq, HBAS_EQ_BUILTIN_FLAT))
-		snprintf(eq, sizeof(eq), "%s", audio.system == HBAS_SYS_CUSTOM && out == HBAS_OUT_SPEAKERS
-						 ? "flat (custom system)" : "flat (bike model ?)");
-	lv_label_set_text_fmt(lbl_eq, "Factory EQ, engine %s: %s",
-			      last_engine < 0 ? "?" : engine_running ? "on" : "off", eq);
-	lv_label_set_text(lbl_dsp, backend && backend->apply ? "DSP writes logged only (not sent yet)"
-					 : "DSP: no audio backend");
 	lv_label_set_text(lbl_hint, editing ? LV_SYMBOL_LEFT LV_SYMBOL_RIGHT " adjust  OK done"
 					    : LV_SYMBOL_UP LV_SYMBOL_DOWN " select  OK adjust");
 }
@@ -182,10 +173,6 @@ void ui_audio_build(lv_obj_t *p)
 	make_row(p, HBAS_AI_SYSTEM, false, 0, 0);
 	make_row(p, HBAS_AI_HEADSET, false, 0, 0);
 	make_row(p, HBAS_AI_SPEED_VOLUME, false, 0, 0);
-	lbl_eq = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
-	lv_obj_set_pos(lbl_eq, 12, 196);
-	lbl_dsp = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
-	lv_obj_set_pos(lbl_dsp, 12, 214);
 	lbl_hint = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
 	lv_obj_align(lbl_hint, LV_ALIGN_TOP_RIGHT, -12, 8);
 	refresh();

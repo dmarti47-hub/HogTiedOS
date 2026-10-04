@@ -26,6 +26,7 @@ void ui_update(const struct hbas_vehicle *v);
 void ui_key(enum ui_key key);
 enum ui_page ui_current_page(void);
 void ui_goto(enum ui_page page);              /* direct navigation (tests/snapshots) */
+bool ui_home_key(enum ui_key key);
 
 /* Audio: where settings go (NULL = nowhere), and bike facts that shape it. */
 void ui_set_audio_backend(const struct hbas_audio_backend *b);

@@ -116,7 +116,7 @@ static void refresh(void)
 
 	for (int i = 0; i < BTN_COUNT; i++) {
 		bool hi = i == sel;
-		bool enabled = i == BTN_PAIR ? bt.daemon && bt.agent : bt.player;
+		bool enabled = i == BTN_PAIR ? true : bt.player;
 
 		lv_label_set_text(btn_lbl[i], i == BTN_PLAY && bt.status == HBAS_BT_PLAYING
 					      ? LV_SYMBOL_PAUSE : sym[i]);
@@ -725,15 +725,11 @@ bool ui_media_key(enum ui_key key)
 	case UI_KEY_ENTER:
 		if (sel != BTN_PAIR && !bt.player)
 			break;                      /* greyed out: no phone controls */
-		if (sel == BTN_PAIR && !(bt.daemon && bt.agent))
-			break;                      /* PC: pair from its own settings */
 		switch (sel) {
 		case BTN_PREV: cmd("previous\n"); break;
 		case BTN_NEXT: cmd("next\n"); break;
 		case BTN_PLAY: cmd(bt.status == HBAS_BT_PLAYING ? "pause\n" : "play\n"); break;
-		case BTN_PAIR:
-			cmd(bt.pairable ? "pairable off\n" : "pairable on\n");
-			break;
+		case BTN_PAIR: ui_goto(UI_PAGE_BLUETOOTH); break;   /* -> Bluetooth settings */
 		}
 		break;
 	default:

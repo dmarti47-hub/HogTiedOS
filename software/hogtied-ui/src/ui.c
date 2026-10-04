@@ -21,9 +21,52 @@ static lv_obj_t *pages[UI_PAGE_COUNT];
 static enum ui_page page;
 static void show_page(enum ui_page n);
 
+/* where the back / Home key goes from each page (one level up) */
+static const enum ui_page ui_parent[UI_PAGE_COUNT] = {
+	[UI_PAGE_HOME] = UI_PAGE_HOME,
+	[UI_PAGE_NAV] = UI_PAGE_HOME,
+	[UI_PAGE_MEDIA] = UI_PAGE_HOME,
+	[UI_PAGE_INFO] = UI_PAGE_HOME,
+	[UI_PAGE_SETTINGS] = UI_PAGE_HOME,
+	[UI_PAGE_AUDIO] = UI_PAGE_SETTINGS,
+	[UI_PAGE_EQ] = UI_PAGE_AUDIO,
+	[UI_PAGE_BLUETOOTH] = UI_PAGE_SETTINGS,
+};
+
 /* Home (audio): media box + nav buttons + status icons */
 static lv_obj_t *lbl_home_clock, *lbl_home_track, *lbl_home_src;
 static lv_obj_t *st_temp, *st_tire, *st_fuel, *st_oil;
+#define HOME_BTNS 4
+static lv_obj_t *home_btns[HOME_BTNS];
+static const enum ui_page home_targets[HOME_BTNS] = {
+	UI_PAGE_NAV, UI_PAGE_MEDIA, UI_PAGE_INFO, UI_PAGE_SETTINGS,
+};
+static int home_sel;
+
+static void home_highlight(void)
+{
+	for (int i = 0; i < HOME_BTNS; i++) {
+		bool on = i == home_sel;
+
+		lv_obj_set_style_border_width(home_btns[i], on ? 2 : 1, 0);
+		lv_obj_set_style_border_color(home_btns[i], on ? COL_ACCENT : COL_LINE, 0);
+		lv_obj_set_style_bg_color(home_btns[i], on ? COL_SURFACE_HI : COL_SURFACE, 0);
+		lv_obj_set_style_text_color(lv_obj_get_child(home_btns[i], 0),
+					    on ? COL_ACCENT : COL_TEXT, 0);
+	}
+}
+
+bool ui_home_key(enum ui_key key)
+{
+	switch (key) {
+	case UI_KEY_UP: case UI_KEY_LEFT: home_sel = (home_sel + HOME_BTNS - 1) % HOME_BTNS; break;
+	case UI_KEY_DOWN: case UI_KEY_RIGHT: home_sel = (home_sel + 1) % HOME_BTNS; break;
+	case UI_KEY_ENTER: show_page(home_targets[home_sel]); return true;
+	default: return false;
+	}
+	home_highlight();
+	return true;
+}
 /* Info: vehicle sensor outputs */
 static lv_obj_t *iv_ign, *iv_gear, *iv_engine, *iv_rpm, *iv_speed, *iv_ambient;
 static lv_obj_t *iv_oil, *iv_fuel, *iv_etemp, *iv_ctemp;
@@ -204,10 +247,11 @@ static void build_home(lv_obj_t *p)
 	st_oil = status_tile(p, 156, 166, "OIL");
 
 	/* navigation buttons (vertical, right) */
-	nav_button(p, 278, 6, 116, 52, "Navigation", UI_PAGE_NAV);
-	nav_button(p, 278, 64, 116, 52, "Music", UI_PAGE_MEDIA);
-	nav_button(p, 278, 122, 116, 52, "Info", UI_PAGE_INFO);
-	nav_button(p, 278, 180, 116, 52, "Settings", UI_PAGE_SETTINGS);
+	home_btns[0] = nav_button(p, 278, 6, 116, 52, "Navigation", UI_PAGE_NAV);
+	home_btns[1] = nav_button(p, 278, 64, 116, 52, "Music", UI_PAGE_MEDIA);
+	home_btns[2] = nav_button(p, 278, 122, 116, 52, "Info", UI_PAGE_INFO);
+	home_btns[3] = nav_button(p, 278, 180, 116, 52, "Settings", UI_PAGE_SETTINGS);
+	home_highlight();
 }
 
 /* ---- Info (sensor outputs) ---------------------------------------------- */
@@ -336,7 +380,6 @@ void ui_create(void)
 	/* Equalizer lives inside Audio settings */
 	nav_button(pages[UI_PAGE_AUDIO], 300, 206, 92, 30, "EQ", UI_PAGE_EQ);
 	/* back buttons through the settings hierarchy */
-	add_back(pages[UI_PAGE_SETTINGS], UI_PAGE_HOME);
 	add_back(pages[UI_PAGE_AUDIO], UI_PAGE_SETTINGS);
 	add_back(pages[UI_PAGE_EQ], UI_PAGE_AUDIO);
 	add_back(pages[UI_PAGE_BLUETOOTH], UI_PAGE_SETTINGS);
@@ -494,9 +537,11 @@ void ui_key(enum ui_key key)
 		return;
 	if (page == UI_PAGE_BLUETOOTH && ui_bt_key(key))
 		return;
-	/* the bezel / handlebar Home button returns to the Home page */
+	if (page == UI_PAGE_HOME && ui_home_key(key))
+		return;
+	/* the handlebar back / Home key goes up one level (Home from the top) */
 	if (key == UI_KEY_BACK)
-		show_page(UI_PAGE_HOME);
+		show_page(ui_parent[page]);
 }
 
 void ui_goto(enum ui_page p)
