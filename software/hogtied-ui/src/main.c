@@ -360,6 +360,7 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 		{ 22340, -1, "", "05c-radio-tuned" },
 		{ 22360, UI_PAGE_MEDIA, "LDDE", "05d-pair-nav" },
 		{ 22300, UI_PAGE_AUDIO, "", "06-audio" },
+		{ 22420, UI_PAGE_AUDIO, "UE", "06b-audio-eq-nav" },
 		{ 22400, UI_PAGE_EQ, "", "07-eq" },
 		{ 23000, UI_PAGE_HOME, "", "08-home-warn" },       /* low fuel: FUEL turns amber */
 	};

@@ -312,19 +312,66 @@ static void build_info(lv_obj_t *p)
 
 /* ---- Settings ----------------------------------------------------------- */
 
+#define SET_BTNS 3
+static lv_obj_t *set_btns[SET_BTNS];
+/* -1 = not a page (placeholder) */
+static const int set_targets[SET_BTNS] = { UI_PAGE_AUDIO, UI_PAGE_BLUETOOTH, -1 };
+static int set_sel;
+
+static void settings_highlight(void)
+{
+	for (int i = 0; i < SET_BTNS; i++) {
+		bool on = i == set_sel;
+
+		lv_obj_set_style_border_width(set_btns[i], on ? 2 : 1, 0);
+		lv_obj_set_style_border_color(set_btns[i], on ? COL_ACCENT : COL_LINE, 0);
+		lv_obj_set_style_bg_color(set_btns[i], on ? COL_SURFACE_HI : COL_SURFACE, 0);
+		lv_obj_set_style_text_color(lv_obj_get_child(set_btns[i], 0), on ? COL_ACCENT
+					    : COL_TEXT, 0);
+	}
+}
+
+bool ui_settings_key(enum ui_key key)
+{
+	switch (key) {
+	case UI_KEY_UP: case UI_KEY_LEFT: set_sel = (set_sel + SET_BTNS - 1) % SET_BTNS; break;
+	case UI_KEY_DOWN: case UI_KEY_RIGHT: set_sel = (set_sel + 1) % SET_BTNS; break;
+	case UI_KEY_ENTER:
+		if (set_targets[set_sel] >= 0)
+			show_page((enum ui_page)set_targets[set_sel]);
+		return true;
+	default: return false;
+	}
+	settings_highlight();
+	return true;
+}
+
 static void build_settings(lv_obj_t *p)
 {
 	lv_obj_t *cap;
 
 	cap = ui_label(p, FONT_RG, COL_TEXT, "Settings");
-	lv_obj_align(cap, LV_ALIGN_TOP_LEFT, 58, 8);
+	lv_obj_align(cap, LV_ALIGN_TOP_LEFT, 12, 8);
 
-	nav_button(p, 8, 46, 186, 54, "Audio & EQ", UI_PAGE_AUDIO);
-	nav_button(p, 206, 46, 186, 54, "Bluetooth", UI_PAGE_BLUETOOTH);
-	ui_button(p, 8, 108, 186, 54, "Theme", NULL, NULL);   /* placeholder */
+	set_btns[0] = nav_button(p, 8, 46, 186, 54, "Audio & EQ", UI_PAGE_AUDIO);
+	set_btns[1] = nav_button(p, 206, 46, 186, 54, "Bluetooth", UI_PAGE_BLUETOOTH);
+	set_btns[2] = ui_button(p, 8, 108, 186, 54, "Theme", NULL, NULL);   /* placeholder */
+	settings_highlight();
 
 	lbl_sys = ui_label(p, FONT_TINY, COL_DIM, "");
 	lv_obj_align(lbl_sys, LV_ALIGN_BOTTOM_LEFT, 12, -8);
+}
+
+/* Info is a scrollable column; the handlebars scroll it. */
+bool ui_info_key(enum ui_key key)
+{
+	if (key == UI_KEY_UP)
+		lv_obj_scroll_by(pages[UI_PAGE_INFO], 0, 60, LV_ANIM_ON);
+	else if (key == UI_KEY_DOWN)
+		lv_obj_scroll_by(pages[UI_PAGE_INFO], 0, -60, LV_ANIM_ON);
+	else
+		return false;
+	return true;
 }
 
 /* ---- navigation / chrome ----------------------------------------------- */
@@ -377,8 +424,6 @@ void ui_create(void)
 	ui_audio_build(pages[UI_PAGE_AUDIO]);
 	ui_eq_build(pages[UI_PAGE_EQ]);
 	ui_bt_build(pages[UI_PAGE_BLUETOOTH]);
-	/* Equalizer lives inside Audio settings */
-	nav_button(pages[UI_PAGE_AUDIO], 300, 206, 92, 30, "EQ", UI_PAGE_EQ);
 	/* back buttons through the settings hierarchy */
 	add_back(pages[UI_PAGE_AUDIO], UI_PAGE_SETTINGS);
 	add_back(pages[UI_PAGE_EQ], UI_PAGE_AUDIO);
@@ -538,6 +583,10 @@ void ui_key(enum ui_key key)
 	if (page == UI_PAGE_BLUETOOTH && ui_bt_key(key))
 		return;
 	if (page == UI_PAGE_HOME && ui_home_key(key))
+		return;
+	if (page == UI_PAGE_SETTINGS && ui_settings_key(key))
+		return;
+	if (page == UI_PAGE_INFO && ui_info_key(key))
 		return;
 	/* the handlebar back / Home key goes up one level (Home from the top) */
 	if (key == UI_KEY_BACK)

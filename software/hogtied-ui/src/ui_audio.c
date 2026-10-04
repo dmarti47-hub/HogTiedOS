@@ -42,8 +42,11 @@ static int last_engine = -1;               /* -1 = no engine state yet */
 static bool have_speed;
 static unsigned speed_kph_x10;
 static bool engine_running;
+#define SEL_EQ HBAS_AI_COUNT
+#define N_SEL (HBAS_AI_COUNT + 1)
 static int sel;
 static bool editing;
+static lv_obj_t *eq_btn, *eq_btn_lbl;
 static unsigned changes;
 
 static lv_obj_t *row[HBAS_AI_COUNT], *row_name[HBAS_AI_COUNT];
@@ -68,6 +71,15 @@ static void apply(void)
 	struct hbas_audio_db db;
 
 	eq_context();                           /* Harley preset follows volume/output */
+
+	{
+		bool on = sel == SEL_EQ;
+
+		lv_obj_set_style_border_width(eq_btn, on ? 2 : 1, 0);
+		lv_obj_set_style_border_color(eq_btn, on ? COL_ACCENT : COL_LINE, 0);
+		lv_obj_set_style_bg_color(eq_btn, on ? COL_SURFACE_HI : COL_SURFACE, 0);
+		lv_obj_set_style_text_color(eq_btn_lbl, on ? COL_ACCENT : COL_TEXT, 0);
+	}
 
 	hbas_audio_to_db(&audio, ui_eq_current(), &db);
 	if (backend && backend->apply)
@@ -112,6 +124,15 @@ static void refresh(void)
 		lv_obj_set_style_border_width(row[r], hi ? 2 : 0, 0);
 		lv_obj_set_style_border_color(row[r], editing && hi ? COL_ACCENT : COL_DIM, 0);
 		lv_obj_set_style_text_color(row_name[r], editing && hi ? COL_ACCENT : COL_TEXT, 0);
+	}
+
+	{
+		bool on = sel == SEL_EQ;
+
+		lv_obj_set_style_border_width(eq_btn, on ? 2 : 1, 0);
+		lv_obj_set_style_border_color(eq_btn, on ? COL_ACCENT : COL_LINE, 0);
+		lv_obj_set_style_bg_color(eq_btn, on ? COL_SURFACE_HI : COL_SURFACE, 0);
+		lv_obj_set_style_text_color(eq_btn_lbl, on ? COL_ACCENT : COL_TEXT, 0);
 	}
 
 	hbas_audio_to_db(&audio, ui_eq_current(), &db);
@@ -165,6 +186,12 @@ static void make_row(lv_obj_t *p, int r, bool symmetric, int min, int max)
 	}
 }
 
+static void eq_btn_clicked(lv_event_t *e)
+{
+	(void)e;
+	ui_goto(UI_PAGE_EQ);
+}
+
 void ui_audio_build(lv_obj_t *p)
 {
 	hbas_audio_defaults(&audio);
@@ -175,6 +202,11 @@ void ui_audio_build(lv_obj_t *p)
 	make_row(p, HBAS_AI_SPEED_VOLUME, false, 0, 0);
 	lbl_hint = ui_label(p, &lv_font_montserrat_14, COL_DIM, "");
 	lv_obj_align(lbl_hint, LV_ALIGN_TOP_RIGHT, -12, 8);
+	eq_btn = ui_card(p, 300, 206, 92, 30);
+	lv_obj_add_flag(eq_btn, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(eq_btn, eq_btn_clicked, LV_EVENT_CLICKED, NULL);
+	eq_btn_lbl = ui_label(eq_btn, FONT_SM, COL_TEXT, "Equalizer");
+	lv_obj_center(eq_btn_lbl);
 	refresh();
 }
 
@@ -278,13 +310,17 @@ void ui_settings_set(const struct hbas_audio_settings *a, const struct hbas_eq *
 	refresh();
 }
 
+static bool sel_visible(int r)
+{
+	return r == SEL_EQ || row_visible(r);
+}
 static void move_sel(int dir)
 {
 	int r = sel;
 
 	do {
-		r = (r + dir + HBAS_AI_COUNT) % HBAS_AI_COUNT;
-	} while (!row_visible(r));
+		r = (r + dir + N_SEL) % N_SEL;
+	} while (!sel_visible(r));
 	sel = r;
 }
 
@@ -311,7 +347,12 @@ bool ui_audio_key(enum ui_key key)
 	switch (key) {
 	case UI_KEY_UP: move_sel(-1); break;
 	case UI_KEY_DOWN: move_sel(+1); break;
-	case UI_KEY_ENTER: editing = true; break;
+	case UI_KEY_ENTER:
+		if (sel == SEL_EQ)
+			ui_goto(UI_PAGE_EQ);
+		else
+			editing = true;
+		break;
 	default: return false;              /* Left/Right/Back: page navigation */
 	}
 	refresh();
