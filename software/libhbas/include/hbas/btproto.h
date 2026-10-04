@@ -13,13 +13,16 @@
  *   play status=playing|paused|stopped|forward-seek|reverse-seek|error position=MS
  *   pair device="Phone" passkey=123456      (confirm on screen)
  *   pair-end result=ok|rejected|failed|cancelled
+ *   devices n=K                              (K device lines follow, resets the list)
+ *   device id="PATH" name="Phone" paired=0|1 connected=0|1
  * UI -> daemon
  *   play | pause | next | previous | stop
  *   pairable on|off                          (visible + pairable for a while)
  *   power on|off                             (adapter power; unit only)
  *   confirm yes|no                           (answer to "pair")
- *   disconnect
- *   forget                                   (remove/unpair the phone; unit only)
+ *   disconnect [id="PATH"]                   (a specific device, or the connected one)
+ *   connect id="PATH"                        (connect a known device)
+ *   forget [id="PATH"]                       (remove/unpair; unit only)
  */
 #ifndef HBAS_BTPROTO_H
 #define HBAS_BTPROTO_H
@@ -31,6 +34,8 @@
 #define HBAS_BT_LINE_MAX 512
 #define HBAS_BT_TEXT_MAX 96          /* longest value kept (titles are cut) */
 #define HBAS_BT_ARGS_MAX 8
+#define HBAS_BT_MAX_DEVICES 8
+#define HBAS_BT_ID_MAX 64            /* device id (its BlueZ object path) */
 
 struct hbas_bt_msg {
 	char verb[16];
@@ -55,6 +60,13 @@ int hbas_bt_format(char *buf, size_t len, const char *verb, ...);
 enum hbas_bt_status { HBAS_BT_STOPPED, HBAS_BT_PLAYING, HBAS_BT_PAUSED, HBAS_BT_SEEKING,
 		      HBAS_BT_ERROR };
 
+/* One known (paired) phone, from the daemon's device list. */
+struct hbas_bt_device {
+	char id[HBAS_BT_ID_MAX];     /* stable id (BlueZ object path) */
+	char name[HBAS_BT_TEXT_MAX];
+	bool paired, connected;
+};
+
 struct hbas_bt_state {
 	bool daemon;                 /* connected to hbas-btd */
 	bool powered, pairable, agent, connected, player;
@@ -66,6 +78,9 @@ struct hbas_bt_state {
 	char pair_device[HBAS_BT_TEXT_MAX];
 	uint32_t pair_passkey;
 	char pair_result[16];        /* last pair-end result, "" if none */
+	struct hbas_bt_device dev[HBAS_BT_MAX_DEVICES];
+	int ndev;                    /* known devices (from devices/device lines) */
+	int dev_expected;            /* K from the last "devices n=K" */
 	unsigned changes;            /* bumps on every applied message */
 };
 

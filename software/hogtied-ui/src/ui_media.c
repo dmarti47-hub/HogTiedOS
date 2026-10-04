@@ -480,39 +480,58 @@ void ui_media_build(lv_obj_t *top)
 
 /* ---- Bluetooth settings page (phone connection) ------------------------ */
 
-enum { BT_POWER, BT_PAIR, BT_DISCONNECT, BT_FORGET, BT_ACTIONS };
-static lv_obj_t *bt_rows[BT_ACTIONS], *bt_row_lbl[BT_ACTIONS], *bt_status, *bt_note;
-static int bt_sel;
+#define BT_TOP 2                         /* Power, Pair */
+static lv_obj_t *bt_status, *bt_note, *bt_list;
+static lv_obj_t *bt_top[BT_TOP], *bt_top_lbl[BT_TOP];
+static lv_obj_t *bt_dev_row[HBAS_BT_MAX_DEVICES], *bt_dev_lbl[HBAS_BT_MAX_DEVICES];
+static int bt_sel;                       /* 0=power, 1=pair, 2+ = device index */
+
+static int bt_nsel(void) { return BT_TOP + (bt.ndev < HBAS_BT_MAX_DEVICES ? bt.ndev
+							    : HBAS_BT_MAX_DEVICES); }
+
+static void bt_send_id(const char *verb, const char *id)
+{
+	char line[128];
+
+	if (hbas_bt_format(line, sizeof(line), verb, "id", id, NULL) > 0)
+		cmd(line);
+}
 
 static void bt_refresh(void)
 {
 	char buf[160];
-	bool can[BT_ACTIONS];
+	int nsel = bt_nsel();
 
 	if (!bt_status)
 		return;
-	can[BT_POWER] = bt.daemon;
-	can[BT_PAIR] = bt.daemon && bt.agent;
-	can[BT_DISCONNECT] = bt.connected;
-	can[BT_FORGET] = bt.connected;
+	if (bt_sel >= nsel)
+		bt_sel = nsel - 1;
 
-	lv_label_set_text(bt_row_lbl[BT_POWER], bt.powered ? "Bluetooth: On" : "Bluetooth: Off");
-	lv_label_set_text(bt_row_lbl[BT_PAIR], bt.pairable ? "Visible - pairing..." : "Pair a phone");
-	if (bt.connected)
-		snprintf(buf, sizeof(buf), "Disconnect %s", bt.device[0] ? bt.device : "phone");
-	else
-		snprintf(buf, sizeof(buf), "Disconnect");
-	lv_label_set_text(bt_row_lbl[BT_DISCONNECT], buf);
-	lv_label_set_text(bt_row_lbl[BT_FORGET], "Forget this phone");
-
-	for (int i = 0; i < BT_ACTIONS; i++) {
+	lv_label_set_text(bt_top_lbl[0], bt.powered ? "Bluetooth: On" : "Bluetooth: Off");
+	lv_label_set_text(bt_top_lbl[1], bt.pairable ? "Visible - pairing..." : "Pair a phone");
+	for (int i = 0; i < BT_TOP; i++) {
 		bool on = i == bt_sel;
 
-		lv_obj_set_style_bg_opa(bt_rows[i], on ? LV_OPA_COVER : LV_OPA_40, 0);
-		lv_obj_set_style_bg_color(bt_rows[i], on ? COL_SURFACE_HI : COL_SURFACE, 0);
-		lv_obj_set_style_border_width(bt_rows[i], on ? 2 : 1, 0);
-		lv_obj_set_style_border_color(bt_rows[i], on ? COL_ACCENT : COL_LINE, 0);
-		lv_obj_set_style_text_color(bt_row_lbl[i], can[i] ? COL_TEXT : COL_DIM, 0);
+		lv_obj_set_style_border_width(bt_top[i], on ? 2 : 1, 0);
+		lv_obj_set_style_border_color(bt_top[i], on ? COL_ACCENT : COL_LINE, 0);
+		lv_obj_set_style_bg_color(bt_top[i], on ? COL_SURFACE_HI : COL_SURFACE, 0);
+	}
+
+	for (int i = 0; i < HBAS_BT_MAX_DEVICES; i++) {
+		if (i < bt.ndev) {
+			bool on = bt_sel == BT_TOP + i;
+
+			snprintf(buf, sizeof(buf), "%s%s", bt.dev[i].name,
+				 bt.dev[i].connected ? "   " LV_SYMBOL_OK " connected" : "");
+			lv_label_set_text(bt_dev_lbl[i], buf);
+			lv_obj_set_style_text_color(bt_dev_lbl[i],
+						    bt.dev[i].connected ? COL_ACCENT : COL_TEXT, 0);
+			lv_obj_set_style_border_width(bt_dev_row[i], on ? 2 : 1, 0);
+			lv_obj_set_style_border_color(bt_dev_row[i], on ? COL_ACCENT : COL_LINE, 0);
+			lv_obj_remove_flag(bt_dev_row[i], LV_OBJ_FLAG_HIDDEN);
+		} else {
+			lv_obj_add_flag(bt_dev_row[i], LV_OBJ_FLAG_HIDDEN);
+		}
 	}
 
 	if (!bt.daemon)
@@ -524,62 +543,99 @@ static void bt_refresh(void)
 			 bt.device[0] ? bt.device : "phone");
 	else if (bt.pairable)
 		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " Visible - pair from your phone now");
+	else if (bt.ndev)
+		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " Tap a phone to connect");
 	else
-		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " No phone connected");
+		snprintf(buf, sizeof(buf), LV_SYMBOL_BLUETOOTH " No paired phones");
 	lv_label_set_text(bt_status, buf);
 
-	/* on a PC the desktop owns the adapter; the daemon ignores power/pair */
 	(bt.daemon && !bt.agent ? lv_obj_remove_flag : lv_obj_add_flag)(bt_note,
 									LV_OBJ_FLAG_HIDDEN);
 }
 
-static void bt_activate(int i)
+static void bt_activate(int sel)
 {
-	switch (i) {
-	case BT_POWER: cmd(bt.powered ? "power off\n" : "power on\n"); break;
-	case BT_PAIR: cmd("pairable on\n"); break;
-	case BT_DISCONNECT: if (bt.connected) cmd("disconnect\n"); break;
-	case BT_FORGET: if (bt.connected) cmd("forget\n"); break;
+	if (sel == 0)
+		cmd(bt.powered ? "power off\n" : "power on\n");
+	else if (sel == 1)
+		cmd("pairable on\n");
+	else {
+		int i = sel - BT_TOP;
+
+		if (i >= 0 && i < bt.ndev)
+			bt_send_id(bt.dev[i].connected ? "disconnect" : "connect", bt.dev[i].id);
 	}
 }
 
-static void bt_row_clicked(lv_event_t *e)
+static void bt_top_clicked(lv_event_t *e)
 {
 	bt_sel = (int)(intptr_t)lv_event_get_user_data(e);
 	bt_activate(bt_sel);
 	bt_refresh();
 }
 
+static void bt_dev_clicked(lv_event_t *e)
+{
+	int i = (int)(intptr_t)lv_event_get_user_data(e);
+
+	if (i >= bt.ndev)
+		return;
+	bt_sel = BT_TOP + i;
+	if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED)
+		bt_send_id("forget", bt.dev[i].id);     /* hold to forget */
+	else
+		bt_send_id(bt.dev[i].connected ? "disconnect" : "connect", bt.dev[i].id);
+	bt_refresh();
+}
+
 void ui_bt_build(lv_obj_t *p)
 {
-	static const char *const labels[BT_ACTIONS] = {
-		"Bluetooth", "Pair a phone", "Disconnect", "Forget this phone",
-	};
+	static const char *const top[BT_TOP] = { "Bluetooth", "Pair a phone" };
 
 	bt_status = ui_label(p, FONT_SM, COL_DIM, "");
 	lv_obj_set_pos(bt_status, 12, 40);
 
-	for (int i = 0; i < BT_ACTIONS; i++) {
-		lv_obj_t *c = ui_card(p, 12, 66 + i * 40, 376, 34);
-
-		lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
-		lv_obj_add_event_cb(c, bt_row_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-		bt_row_lbl[i] = ui_label(c, FONT_SM, COL_TEXT, labels[i]);
-		lv_obj_align(bt_row_lbl[i], LV_ALIGN_LEFT_MID, 12, 0);
-		bt_rows[i] = c;
+	for (int i = 0; i < BT_TOP; i++) {
+		bt_top[i] = ui_card(p, 12 + i * 194, 64, 182, 32);
+		lv_obj_add_flag(bt_top[i], LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_add_event_cb(bt_top[i], bt_top_clicked, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+		bt_top_lbl[i] = ui_label(bt_top[i], FONT_SM, COL_TEXT, top[i]);
+		lv_obj_center(bt_top_lbl[i]);
 	}
+
+	/* scrollable list of paired phones */
+	bt_list = lv_obj_create(p);
+	lv_obj_remove_style_all(bt_list);
+	lv_obj_set_pos(bt_list, 8, 104);
+	lv_obj_set_size(bt_list, 384, 116);
+	lv_obj_set_flex_flow(bt_list, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_style_pad_row(bt_list, 6, 0);
+	lv_obj_set_scroll_dir(bt_list, LV_DIR_VER);
+	for (int i = 0; i < HBAS_BT_MAX_DEVICES; i++) {
+		bt_dev_row[i] = ui_card(bt_list, 0, 0, 368, 32);
+		lv_obj_add_flag(bt_dev_row[i], LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_add_event_cb(bt_dev_row[i], bt_dev_clicked, LV_EVENT_CLICKED,
+				    (void *)(intptr_t)i);
+		lv_obj_add_event_cb(bt_dev_row[i], bt_dev_clicked, LV_EVENT_LONG_PRESSED,
+				    (void *)(intptr_t)i);
+		bt_dev_lbl[i] = ui_label(bt_dev_row[i], FONT_SM, COL_TEXT, "");
+		lv_obj_align(bt_dev_lbl[i], LV_ALIGN_LEFT_MID, 12, 0);
+		lv_obj_add_flag(bt_dev_row[i], LV_OBJ_FLAG_HIDDEN);
+	}
+
 	bt_note = ui_label(p, FONT_TINY, COL_DIM,
-			   "On this PC, manage pairing in the system Bluetooth settings.");
+			   "hold a phone to forget it");
 	lv_obj_align(bt_note, LV_ALIGN_BOTTOM_LEFT, 12, -6);
-	lv_obj_add_flag(bt_note, LV_OBJ_FLAG_HIDDEN);
 	bt_refresh();
 }
 
 bool ui_bt_key(enum ui_key key)
 {
+	int nsel = bt_nsel();
+
 	switch (key) {
-	case UI_KEY_UP: bt_sel = (bt_sel + BT_ACTIONS - 1) % BT_ACTIONS; break;
-	case UI_KEY_DOWN: bt_sel = (bt_sel + 1) % BT_ACTIONS; break;
+	case UI_KEY_UP: bt_sel = (bt_sel + nsel - 1) % nsel; break;
+	case UI_KEY_DOWN: bt_sel = (bt_sel + 1) % nsel; break;
 	case UI_KEY_ENTER: bt_activate(bt_sel); break;
 	default: return false;
 	}

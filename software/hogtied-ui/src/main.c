@@ -382,6 +382,9 @@ static int snapshot(const char *prefix, const char *map_dir, const char *map_sty
 	bt_feed_line("track title=\"Born to Be Wild\" artist=Steppenwolf album=Steppenwolf "
 		     "duration=210000");
 	bt_feed_line("play status=playing position=64000");
+	bt_feed_line("devices n=2");
+	bt_feed_line("device id=\"/org/bluez/hci0/dev_RIDER\" name=\"Rider's Phone\" paired=1 connected=1");
+	bt_feed_line("device id=\"/org/bluez/hci0/dev_GARMIN\" name=\"Garmin Zumo\" paired=1 connected=0");
 	/* demo GPS fix (Milwaukee), as hbas-gpsd would report it */
 	gps_link(true);
 	gps_feed_line("gps link=1 valid=1 fix=3d quality=1 lat=43.038902 lon=-87.906474 "

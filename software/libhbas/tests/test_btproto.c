@@ -85,11 +85,33 @@ static void test_state(void)
 	CHECK(hbas_bt_parse("future thing=1\n", &m) == 0 && !hbas_bt_apply(&s, &m));
 }
 
+
+static void test_device_list(void)
+{
+	struct hbas_bt_state s;
+	struct hbas_bt_msg m;
+
+	hbas_bt_state_init(&s);
+	CHECK(!hbas_bt_parse("devices n=2", &m) && hbas_bt_apply(&s, &m));
+	CHECK(s.dev_expected == 2 && s.ndev == 0);
+	CHECK(!hbas_bt_parse("device id=\"/org/bluez/hci0/dev_AA\" name=\"Pixel\" paired=1 connected=1",
+			     &m) && hbas_bt_apply(&s, &m));
+	CHECK(!hbas_bt_parse("device id=\"/org/bluez/hci0/dev_BB\" name=\"Garmin\" paired=1 connected=0",
+			     &m) && hbas_bt_apply(&s, &m));
+	CHECK(s.ndev == 2);
+	CHECK(!strcmp(s.dev[0].name, "Pixel") && s.dev[0].connected && s.dev[0].paired);
+	CHECK(!strcmp(s.dev[1].id, "/org/bluez/hci0/dev_BB") && !s.dev[1].connected);
+	/* a fresh "devices" resets the list */
+	CHECK(!hbas_bt_parse("devices n=0", &m) && hbas_bt_apply(&s, &m));
+	CHECK(s.ndev == 0);
+}
+
 int main(void)
 {
 	test_roundtrip_and_quoting();
 	test_long_and_bad_input();
 	test_state();
+	test_device_list();
 	if (failures) {
 		fprintf(stderr, "%d check(s) failed\n", failures);
 		return EXIT_FAILURE;

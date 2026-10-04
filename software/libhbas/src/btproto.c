@@ -162,11 +162,16 @@ static bool flag(const struct hbas_bt_msg *m, const char *key, bool dflt)
 	return v ? !strcmp(v, "1") : dflt;
 }
 
-static void text(char *dst, const struct hbas_bt_msg *m, const char *key)
+static void text_sz(char *dst, size_t sz, const struct hbas_bt_msg *m, const char *key)
 {
 	const char *v = hbas_bt_get(m, key);
 
-	snprintf(dst, HBAS_BT_TEXT_MAX, "%s", v ? v : "");
+	snprintf(dst, sz, "%s", v ? v : "");
+}
+
+static void text(char *dst, const struct hbas_bt_msg *m, const char *key)
+{
+	text_sz(dst, HBAS_BT_TEXT_MAX, m, key);
 }
 
 bool hbas_bt_apply(struct hbas_bt_state *s, const struct hbas_bt_msg *m)
@@ -207,6 +212,18 @@ bool hbas_bt_apply(struct hbas_bt_state *s, const struct hbas_bt_msg *m)
 		text(s->pair_device, m, "device");
 		s->pair_passkey = num(m, "passkey", 0);
 		s->pair_result[0] = '\0';
+	} else if (!strcmp(m->verb, "devices")) {
+		s->dev_expected = (int)num(m, "n", 0);
+		s->ndev = 0;                         /* a fresh list follows */
+	} else if (!strcmp(m->verb, "device")) {
+		if (s->ndev < HBAS_BT_MAX_DEVICES) {
+			struct hbas_bt_device *d = &s->dev[s->ndev++];
+
+			text_sz(d->id, sizeof(d->id), m, "id");
+			text(d->name, m, "name");
+			d->paired = flag(m, "paired", false);
+			d->connected = flag(m, "connected", false);
+		}
 	} else if (!strcmp(m->verb, "pair-end")) {
 		const char *r = hbas_bt_get(m, "result");
 

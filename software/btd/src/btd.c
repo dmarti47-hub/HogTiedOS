@@ -295,6 +295,7 @@ static void broadcast(const char *line)
 
 /* last lines sent, so only real changes go out */
 static char last_bt[HBAS_BT_LINE_MAX], last_track[HBAS_BT_LINE_MAX], last_play[HBAS_BT_LINE_MAX];
+static char last_devs[HBAS_BT_LINE_MAX * HBAS_BT_MAX_DEVICES];
 
 static void build_state(char *bt, char *track, char *play)
 {
@@ -317,8 +318,34 @@ static void build_state(char *bt, char *track, char *play)
 		       "status", p && p->status[0] ? p->status : "stopped", "position", pos, NULL);
 }
 
+/* The paired phones, as "devices n=K\n" then one "device ..." line each,
+ * concatenated into out. */
+static void build_devices(char *out, size_t cap)
+{
+	int k = 0;
+	size_t off;
+
+	for (int i = 0; i < MAX_OBJS; i++)
+		if (objs[i].path[0] && objs[i].device && (objs[i].paired || objs[i].connected))
+			k++;
+	off = (size_t)snprintf(out, cap, "devices n=%d\n", k);
+	for (int i = 0; i < MAX_OBJS && off < cap; i++) {
+		struct obj *o = &objs[i];
+
+		if (!o->path[0] || !o->device || !(o->paired || o->connected))
+			continue;
+		off += hbas_bt_format(out + off, cap - off, "device",
+				      "id", o->path,
+				      "name", o->name[0] ? o->name : "phone",
+				      "paired", o->paired ? "1" : "0",
+				      "connected", o->connected ? "1" : "0", NULL);
+	}
+}
+
 static void publish(void)
 {
+	char devs[sizeof(last_devs)];
+
 	char bt[HBAS_BT_LINE_MAX], track[HBAS_BT_LINE_MAX], play[HBAS_BT_LINE_MAX];
 
 	build_state(bt, track, play);
@@ -334,6 +361,11 @@ static void publish(void)
 		strcpy(last_play, play);
 		broadcast(play);
 	}
+	build_devices(devs, sizeof(devs));
+	if (strcmp(devs, last_devs)) {
+		strcpy(last_devs, devs);
+		broadcast(devs);
+	}
 }
 
 static void send_snapshot(int fd)
@@ -341,9 +373,13 @@ static void send_snapshot(int fd)
 	char bt[HBAS_BT_LINE_MAX], track[HBAS_BT_LINE_MAX], play[HBAS_BT_LINE_MAX];
 
 	build_state(bt, track, play);
+	char devs[sizeof(last_devs)];
+
 	send_line(fd, bt);
 	send_line(fd, track);
 	send_line(fd, play);
+	build_devices(devs, sizeof(devs));
+	send_line(fd, devs);
 }
 
 /* ---- D-Bus calls ---------------------------------------------------------- */
@@ -744,13 +780,29 @@ static void handle_command(const char *line)
 	}
 	else if (!strcmp(m.verb, "confirm"))
 		answer_pending(!strcmp(arg, "yes"));
-	else if (!strcmp(m.verb, "disconnect") && d)
-		call_noreply(d->path, IF_DEVICE, "Disconnect");
-	else if (!strcmp(m.verb, "forget") && d) {
-		if (agent_enabled)
-			remove_device(d->path);
-		else
+	else if (!strcmp(m.verb, "connect")) {
+		const char *id = hbas_bt_get(&m, "id");
+
+		if (id && find(id, false))
+			call_noreply(id, IF_DEVICE, "Connect");
+	}
+	else if (!strcmp(m.verb, "disconnect")) {
+		const char *id = hbas_bt_get(&m, "id");
+
+		if (id && find(id, false))
+			call_noreply(id, IF_DEVICE, "Disconnect");
+		else if (d)
+			call_noreply(d->path, IF_DEVICE, "Disconnect");
+	}
+	else if (!strcmp(m.verb, "forget")) {
+		const char *id = hbas_bt_get(&m, "id");
+
+		if (!agent_enabled)
 			logmsg("forget: ignored, not the pairing agent");
+		else if (id && find(id, false))
+			remove_device(id);
+		else if (d)
+			remove_device(d->path);
 	}
 }
 
